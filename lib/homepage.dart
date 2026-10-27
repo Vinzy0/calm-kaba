@@ -3,6 +3,7 @@ import 'dart:async';
 import 'theme/design_system.dart';
 import 'services/detection_service.dart';
 import 'services/log_service.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -169,17 +170,14 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: Icon(
+                        const SizedBox(width: 4),
+                        GestureDetector(
+                          onTap: () => Navigator.pushNamed(context, '/disclaimer'),
+                          child: const Icon(
                             Icons.help_outline,
                             color: Colors.white,
-                            size: 24,
+                            size: 18,
                           ),
-                          onPressed: () => Navigator.pushNamed(context, '/disclaimer'),
-                          constraints: const BoxConstraints(),
-                          padding: EdgeInsets.zero,
-                          tooltip: 'Disclaimer',
                         ),
                       ],
                     ),
@@ -187,26 +185,16 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
 
-              // Placeholder image
+              // SVG Image
               Positioned(
-                right: 0,
+                right: -10, // Slight negative offset to allow overflow to the right edge
                 bottom: 0,
-                child: Container(
-                  width: imageSize,
-                  height: imageSize,
-                  decoration: BoxDecoration(
-                    color: Colors.black12,
-                    borderRadius: const BorderRadius.only(
-                      bottomRight: Radius.circular(20),
-                      topLeft: Radius.circular(20),
-                    ),
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.image,
-                      size: 50,
-                      color: Colors.white54,
-                    ),
+                child: SizedBox(
+                  width: imageSize * 1.2, // Make the SVG slightly larger than the raw calculated bounds
+                  height: imageSize * 1.2,
+                  child: SvgPicture.asset(
+                    'assets/images/finalFish.svg',
+                    fit: BoxFit.contain,
                   ),
                 ),
               ),
@@ -490,9 +478,15 @@ class _HomePageState extends State<HomePage> {
                           cardWidth,
                         ),
                         _buildCopingCard(
-                          'Breathing Regulation',
-                          'Coaches you through inhales and exhales to assist with labored breaths.',
+                          '4-7-8 Breathing',
+                          'Longer exhales to drop your spiked heart rate. Do NOT use when hyperventilating.',
                           '/breathingRegulation',
+                          cardWidth,
+                        ),
+                        _buildCopingCard(
+                          'Box Breathing',
+                          'Guides you through an even breathing practice.',
+                          '/boxBreathing',
                           cardWidth,
                         ),
                         _buildCopingCard(

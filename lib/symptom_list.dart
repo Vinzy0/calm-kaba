@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'theme/design_system.dart';
-import 'services/detection_service.dart';
+import 'services/symptom_data.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SymptomListPage extends StatefulWidget {
   final bool isBottomNav;
@@ -13,23 +14,12 @@ class SymptomListPage extends StatefulWidget {
 
 class _SymptomListPageState extends State<SymptomListPage> {
   final TextEditingController _searchController = TextEditingController();
-  List<Map<String, String>> _filteredSymptoms = [];
-
-  // Data structure mapping symptom names to their brief descriptions
-  final List<Map<String, String>> _symptomData = [
-    {'name': 'Hand Tremor', 'desc': 'Shaking of hands caused by tensed muscles'},
-    {'name': 'Knee Tremor', 'desc': 'Knee rocking when sitting down'},
-    {'name': 'Heavy Breathing', 'desc': 'Rapid breaths caused by spiked heartrate'},
-    {'name': 'Fidgeting', 'desc': 'Acts of unease (ex. fiddling with fingers)'},
-    {'name': 'Avoidant Gaze', 'desc': 'Inability to maintain eye contact.'},
-    {'name': 'Facial Tension', 'desc': 'Contractions and tightness along the facial features due to muscle tension.'},
-    {'name': 'Fear', 'desc': 'Overwhelming emotional response to perceived danger.'},
-  ];
+  List<String> _filteredSymptomKeys = [];
 
   @override
   void initState() {
     super.initState();
-    _filteredSymptoms = List.from(_symptomData);
+    _filteredSymptomKeys = SymptomData.data.keys.toList();
     _searchController.addListener(_onSearchChanged);
   }
 
@@ -43,55 +33,140 @@ class _SymptomListPageState extends State<SymptomListPage> {
   void _onSearchChanged() {
     final query = _searchController.text.toLowerCase();
     setState(() {
-      _filteredSymptoms = _symptomData
-          .where((symptom) => symptom['name']!.toLowerCase().contains(query))
+      _filteredSymptomKeys = SymptomData.data.keys
+          .where((key) => key.toLowerCase().contains(query))
           .toList();
     });
   }
 
-  Widget _buildSymptomCard(String title, String description, bool isLightMode) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.pushNamed(
-          context,
-          '/info',
-          arguments: title,
+  Widget _buildBulletPoint(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('• ', style: AppTypography.bodyMedium.copyWith(fontWeight: FontWeight.bold)),
+          Expanded(
+            child: Text(
+              text,
+              style: AppTypography.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _launchUrl(String urlString) async {
+    final Uri url = Uri.parse(urlString);
+    if (!await launchUrl(url)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open link $urlString')),
         );
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        decoration: BoxDecoration(
-          color: isLightMode ? AppColors.primary : Colors.white,
-          borderRadius: isLightMode ? BorderRadius.circular(12) : BorderRadius.circular(24),
-          border: isLightMode ? null : Border.all(color: AppColors.elizabeth, width: 4),
-        ),
-        child: Row(
+      }
+    }
+  }
+
+  Widget _buildExpandableSymptomCard(String title, Map<String, dynamic> data, bool isLightMode) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: isLightMode ? Theme.of(context).extension<AppColorsExtension>()!.cardBackground : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          iconColor: AppColors.primary,
+          collapsedIconColor: AppColors.primary,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          title: Text(
+            title,
+            style: AppTypography.titleLarge.copyWith(
+              color: isLightMode ? AppColors.textPrimary : AppColors.primary,
+            ),
+          ),
+          subtitle: Text(
+            data['desc'],
+            style: AppTypography.bodySmall.copyWith(
+              color: isLightMode ? AppColors.textPrimary : AppColors.primary.withValues(alpha: 0.8),
+            ),
+          ),
           children: [
-            Expanded(
+            Padding(
+              padding: const EdgeInsets.only(left: 24, right: 24, bottom: 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: AppTypography.titleLarge.copyWith(color: isLightMode ? Colors.white : AppColors.primary),
+                  // Universal Preface Note
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: AppColors.teaGreen.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.elizabeth),
+                    ),
+                    child: Text(
+                      'Individuals suffering from anxiety are stuck at a constant state of perceiving events, sensations, perceptions, thoughts, and even the unknown, at a higher baseline for threat than normal. One of the roles of amygdala, a part of our brain, is perception of threats. When threat is perceived, the amygdala triggers physiological stress responses (anxiety, fear, increased heart rate), before the realness of the threat is even evaluated. The prefrontal cortex is meant to provide emotional regulation when the amygdala fires up, and allows you to employ coping techniques. In people suffering from clinical anxiety, the functional connection between these two parts of the brain are significantly weaker. The prefrontal cortex for such individuals are unable to effectively regulate the threats perceived by the amygdala. This results in anxiety, as normal situations begin to feel threatening without the regulation of the prefrontal cortex.',
+                      style: AppTypography.bodySmall.copyWith(fontStyle: FontStyle.italic),
+                    ),
                   ),
-                  const SizedBox(height: 4),
+
+                  // Overview Section
                   Text(
-                    description,
-                    style: AppTypography.bodySmall.copyWith(color: isLightMode ? Colors.white : AppColors.primary.withValues(alpha: 0.8)),
+                    'Overview',
+                    style: AppTypography.titleLarge.copyWith(color: AppColors.pinkCarnation),
                   ),
+                  const SizedBox(height: 12),
+                  ...(data['overview'] as List<String>).map((paragraph) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12.0),
+                    child: Text(paragraph, style: AppTypography.bodyMedium),
+                  )),
+                  const SizedBox(height: 12),
+                  
+                  // Visible Signs Section
+                  Text(
+                    'Visible Signs',
+                    style: AppTypography.titleLarge.copyWith(color: AppColors.pinkCarnation),
+                  ),
+                  const SizedBox(height: 8),
+                  ...(data['signs'] as List<String>).map((sign) => _buildBulletPoint(sign)),
+                  
+                  // Treatments Section (if applicable)
+                  if (data.containsKey('treatments')) ...[
+                    const SizedBox(height: 24),
+                    Text(
+                      'Common Treatments',
+                      style: AppTypography.titleLarge.copyWith(color: AppColors.pinkCarnation),
+                    ),
+                    const SizedBox(height: 8),
+                    ...(data['treatments'] as List<String>).map((treatment) => _buildBulletPoint(treatment)),
+                  ],
+
+                  // Links Section
+                  const SizedBox(height: 24),
+                  Text(
+                    'Resources',
+                    style: AppTypography.titleLarge.copyWith(color: AppColors.pinkCarnation),
+                  ),
+                  const SizedBox(height: 8),
+                  ...(data['links'] as List<String>).map((link) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0),
+                    child: GestureDetector(
+                      onTap: () => _launchUrl(link),
+                      child: Text(
+                        link,
+                        style: AppTypography.bodyMedium.copyWith(
+                          color: Colors.blue,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  )),
                 ],
               ),
-            ),
-            const SizedBox(width: 16),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isLightMode ? Colors.white : AppColors.elizabeth,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.chevron_right, color: isLightMode ? AppColors.arden : Colors.white, size: 24),
             ),
           ],
         ),
@@ -135,8 +210,8 @@ class _SymptomListPageState extends State<SymptomListPage> {
                   controller: _searchController,
                   decoration: InputDecoration(
                     hintText: 'Search...',
-                    hintStyle: AppTypography.bodyMedium.copyWith(color: AppColors.primary.withValues(alpha: 0.5)),
-                    suffixIcon: Icon(Icons.search, color: AppColors.primary),
+                    hintStyle: AppTypography.bodyMedium.copyWith(color: isLightMode ? AppColors.textPrimary.withValues(alpha: 0.5) : AppColors.primary.withValues(alpha: 0.5)),
+                    suffixIcon: Icon(Icons.search, color: isLightMode ? AppColors.textPrimary : AppColors.primary),
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
                   ),
@@ -147,14 +222,11 @@ class _SymptomListPageState extends State<SymptomListPage> {
               // Symptoms List
               Expanded(
                 child: ListView.builder(
-                  itemCount: _filteredSymptoms.length,
+                  itemCount: _filteredSymptomKeys.length,
                   itemBuilder: (context, index) {
-                    final symptom = _filteredSymptoms[index];
-                    return _buildSymptomCard(
-                      symptom['name']!,
-                      symptom['desc']!,
-                      isLightMode,
-                    );
+                    final key = _filteredSymptomKeys[index];
+                    final data = SymptomData.data[key]!;
+                    return _buildExpandableSymptomCard(key, data, isLightMode);
                   },
                 ),
               ),

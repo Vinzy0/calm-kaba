@@ -4,11 +4,11 @@ import 'main_screen.dart';
 import 'homepage.dart';
 import 'coping_techniques.dart';
 import 'symptom_list.dart';
-import 'info.dart';
 import 'detection_instant.dart';
 import 'detection_log.dart';
 import 'coping_techniques/grounding_technique.dart';
 import 'coping_techniques/breathing_regulation.dart';
+import 'coping_techniques/box_breathing.dart';
 import 'coping_techniques/cognitive_reframing.dart';
 import 'disclaimer.dart';
 
@@ -37,11 +37,11 @@ class MyApp extends StatelessWidget {
             '/home': (context) => const HomePage(),
             '/copingTechniques': (context) => const CopingTechniquesPage(isBottomNav: false),
             '/symptomList': (context) => const SymptomListPage(isBottomNav: false),
-            '/info': (context) => const InfoPage(),
             '/detectionInstant': (context) => const DetectionInstantPage(),
             '/detectionLog': (context) => const DetectionLogPage(),
             '/groundingTechnique': (context) => const GroundingTechniquePage(),
             '/breathingRegulation': (context) => const BreathingRegulationPage(),
+            '/boxBreathing': (context) => const BoxBreathingPage(),
             '/cognitiveReframing': (context) => const CognitiveReframingPage(),
             '/disclaimer': (context) => const DisclaimerPage(),
           },

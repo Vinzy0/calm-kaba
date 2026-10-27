@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import '../theme/design_system.dart';
 
 class BreathingRegulationPage extends StatefulWidget {
@@ -16,6 +17,9 @@ class _BreathingRegulationPageState extends State<BreathingRegulationPage> with 
   int _currentPhase = 0; // 0=Inhale, 1=Hold, 2=Exhale
   String _instructionText = "Ready?";
   String _subInstructionText = "Press start to begin";
+
+  int _completedCycles = 0;
+  int _targetCycles = 0;
 
   @override
   void initState() {
@@ -37,11 +41,31 @@ class _BreathingRegulationPageState extends State<BreathingRegulationPage> with 
     ]).animate(_controller);
 
     _controller.addListener(_updatePhase);
+    _controller.addStatusListener(_onAnimationStatus);
+  }
+
+  void _onAnimationStatus(AnimationStatus status) {
+    if (status == AnimationStatus.completed) {
+      _completedCycles++;
+      if (_completedCycles >= _targetCycles) {
+        // We finished the session
+        setState(() {
+          _isRunning = false;
+          _instructionText = "Session Complete";
+          _subInstructionText = "Great job finding your center.";
+          _controller.reset();
+          _completedCycles = 0;
+        });
+      } else {
+        // Loop again
+        _controller.forward(from: 0.0);
+      }
+    }
   }
 
   void _updatePhase() {
     // Keep default instruction state if animation hasn't started yet
-    if (!_isRunning && _controller.value == 0.0 && _instructionText == "Ready?") {
+    if (!_isRunning && _controller.value == 0.0 && (_instructionText == "Ready?" || _instructionText == "Session Complete")) {
        return;
     }
     
@@ -73,17 +97,84 @@ class _BreathingRegulationPageState extends State<BreathingRegulationPage> with 
     }
   }
 
+  void _startSession(int cycles) {
+    Navigator.pop(context); // Close dialog
+    setState(() {
+      _targetCycles = cycles;
+      _completedCycles = 0;
+      _isRunning = true;
+    });
+    _controller.forward(from: 0.0);
+    _updatePhase();
+  }
+
+  void _showModeSelector() {
+    final isLightMode = Theme.of(context).brightness == Brightness.light;
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: isLightMode ? Theme.of(context).extension<AppColorsExtension>()!.secondaryBackground : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: Text(
+            'Select Duration', 
+            style: AppTypography.titleLarge.copyWith(color: AppColors.primary),
+            textAlign: TextAlign.center,
+          ),
+          content: Text(
+            'How long would you like to practice breathing?',
+            style: AppTypography.bodyMedium.copyWith(color: isLightMode ? AppColors.textPrimary : AppColors.secondary),
+            textAlign: TextAlign.center,
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            Column(
+              children: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => _startSession(4), // 4 loops
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: Text('4 Cycles (~1 min)', style: AppTypography.titleMedium.copyWith(color: Colors.white)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => _startSession(16), // 5 mins = 300s. 300/19 = 15.7 (round up to 16 loops)
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.pinkCarnation,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                    child: Text('5 Minutes', style: AppTypography.titleMedium.copyWith(color: Colors.white)),
+                  ),
+                ),
+              ],
+            )
+          ],
+        );
+      }
+    );
+  }
+
   void _toggleTimer() {
     if (_isRunning) {
       _controller.stop();
       setState(() => _isRunning = false);
     } else {
-      _controller.repeat();
-      setState(() {
-        _isRunning = true;
-        // Force immediate update to change "Ready?" text if it's the first run
-        _updatePhase();
-      });
+      if (_controller.value == 0.0 && _completedCycles == 0) {
+        _showModeSelector();
+      } else {
+        // Resume
+        _controller.forward(from: _controller.value);
+        setState(() => _isRunning = true);
+      }
     }
   }
 
@@ -94,17 +185,13 @@ class _BreathingRegulationPageState extends State<BreathingRegulationPage> with 
   }
 
   Widget _buildImagePlaceholder() {
-    // TODO: Swap this Container with Image.asset('assets/images/pufferfish_placeholder.png') when the asset is available.
     return Container(
-      width: 100, // Reduced from 120 to fit better on screen
-      height: 100,
-      decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.15),
-        shape: BoxShape.circle,
-        border: Border.all(color: AppColors.primary, width: 4),
-      ),
-      child: Center(
-        child: Icon(Icons.image, size: 40, color: AppColors.primary.withValues(alpha: 0.5)),
+      alignment: Alignment.center,
+      width: 140, // increased to make it the highlight
+      height: 140,
+      child: SvgPicture.asset(
+        'assets/images/pufferfishFinal.svg',
+        fit: BoxFit.contain,
       ),
     );
   }
@@ -174,7 +261,7 @@ class _BreathingRegulationPageState extends State<BreathingRegulationPage> with 
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Guided Breathing\nRegulation',
+                    '4-7-8 Breathing',
                     style: AppTypography.headlineMedium.copyWith( // Reduced from displaySmall
                       color: AppColors.primary,
                       fontWeight: FontWeight.bold,
@@ -183,7 +270,7 @@ class _BreathingRegulationPageState extends State<BreathingRegulationPage> with 
                   ),
                   const SizedBox(height: 4), // Reduced spacing
                   Text(
-                    '4-7-8 Breathing',
+                    'Longer exhales to drop your spiked heart rate. Do NOT use when hyperventilating.',
                     style: AppTypography.titleSmall.copyWith(color: AppColors.arden), // Reduced from titleLarge
                   ),
                 ],

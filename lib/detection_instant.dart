@@ -76,9 +76,11 @@ class DetectionInstantPage extends StatelessWidget {
                     children: [
                       ElevatedButton(
                         onPressed: () {
+                          // Note: /info route is now handled through /symptomList?
+                          // For now, we will simply redirect to symptom list and let the user open the dropdown.
                           Navigator.pushReplacementNamed(
                             context,
-                            '/info',
+                            '/symptomList',
                             arguments: symptom,
                           );
                         },
