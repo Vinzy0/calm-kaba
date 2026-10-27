@@ -7,6 +7,7 @@ import android.graphics.*
 import android.os.Handler
 import android.os.Looper
 import android.util.Rational
+import android.util.Log
 import android.util.Size
 import android.view.View
 import android.widget.FrameLayout
@@ -83,10 +84,12 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         }
     }
     private fun fail(id: Int, error: Throwable) {
+        Log.e("CalmCamera", "Camera detection failed", error)
+        val cause = generateSequence(error) { it.cause }.last()
         main.post {
             if (!disposed && generation.get() == id) {
                 stop()
-                emit(mapOf("type" to "error", "message" to "Camera detection unavailable: ${error.message ?: error.javaClass.simpleName}. Stop and try again."))
+                emit(mapOf("type" to "error", "message" to "Camera detection unavailable: ${cause.message ?: cause.javaClass.simpleName}. Stop and try again."))
             }
         }
     }

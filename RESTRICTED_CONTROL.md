@@ -6,7 +6,7 @@ This checkout contains the restricted variant of the original camera integration
 Both variants are committed to the user's private personal repository, separate
 from the team's original repository. The full-feature model assets remain intact
 on their own branch. No model retraining or participant-data upload is part of
-this change. The finished install APK is also in the user's private Google Drive.
+this change.
 
 ## Models and inputs
 
@@ -98,15 +98,42 @@ Install `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` on the Xiaomi 
 Its launcher label is **Calm Kaba Control**. It is signed with the existing local
 debug key for testing, despite using release compilation.
 
-The verified ARM64 release APK is 53,104,476 bytes. Its SHA256 is
-`f1804ee45b9689bc0f09bc633e888405d3658d746ed41374098a881819667a2c`.
-It contains exactly the seven restricted / vs_control manifests and native text
-models, an ARM64 native bridge, and no recorded parity inputs, Parquet files or
-joblib bundles.
+Use version **1.0.1+2 or newer**. The original 1.0.0 release APK (SHA256
+`f1804ee45b9689bc0f09bc633e888405d3658d746ed41374098a881819667a2c`)
+has a camera-startup bug and should not be distributed. Its old Drive upload is
+also obsolete. The earlier numerical parity tests used debug Android builds and
+did not establish release camera startup.
 
-[Private Google Drive APK](https://drive.google.com/file/d/1hl5Vhm91x7fgLSycm97avSuznzHDyqzV/view?usp=drivesdk).
-Open this while signed into the connected Google account, download the file and
-open it on the phone to install.
+The release optimizer removed MediaPipe protobuf fields used through reflection,
+causing `Field platform_ ... not found` before CameraX could bind. The application
+now includes the Protobuf Java Lite maintainers' recommended keep rule in
+`android/app/proguard-rules.pro`. It also preserves MediaPipe's native packet
+callbacks and Flogger's stack-inspecting factory and caller-finder helpers. Without
+the latter, R8 inlining causes `Graph` initialization to fail with "no caller
+found on the stack" after the protobuf issue is fixed. Camera failures now log
+their complete exception chain under the `CalmCamera` tag and show the underlying
+cause in the UI. R8 and release optimization remain enabled.
+The same fix is present on the full-feature branch. The version increment allows
+installing the corrected APK over the old variant using the same signing key.
+
+The corrected ARM64 APK is 53,366,620 bytes, version 1.0.1 (versionCode 2002).
+SHA256: `83fb9d65be2f9adc84db9afd8d56d8068b33949fc47fca4599701580b3054389`.
+It contains the unchanged seven restricted/control models and three tracking
+assets; all 12 deployment assets match this branch byte for byte. No parity
+fixtures or research bundles are packaged. Its signing certificate matches the
+previous APK.
+
+Release validation uses a non-debuggable, R8-optimized x86_64 APK with identical
+Java DEX bytes to the ARM64 APK. The isolated Android emulator opened its front
+camera, processed continuous video for over 50 seconds and displayed all seven
+quality-gated result rows without startup errors. Its synthetic camera scene has
+no real person, so those rows correctly report unavailable tracking. This checks
+release startup and frame processing, not physical-phone accuracy or FPS. The
+Infinix Note 12 still needs a phone retest with this updated APK.
+Backgrounding released the camera, and resuming then starting a fresh scan opened
+it again. The `CalmCamera` error log remained empty. Local evidence is in
+`.verification/release_camera_apk_check.json`, the camera service dumps and
+`.verification/release_fixed_continuous.png`.
 
 Open it, select Continuous Scan, tap Scan Now, grant Camera, then tap Scan Now
 again. Check all seven results, processed FPS and history. Test Instant Scan,
