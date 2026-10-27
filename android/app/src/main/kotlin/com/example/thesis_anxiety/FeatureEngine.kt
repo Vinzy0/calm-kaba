@@ -73,7 +73,7 @@ object LandmarkAdapter {
     }
 }
 
-class FeatureEngine(val bs: List<String>, val fm: List<String>) {
+class FeatureEngine(val bs: List<String>, val fm: List<String>, requestedFeatures: List<String>? = null) {
     companion object {
         val flags = listOf("face_detected", "pose_detected", "left_hand_detected", "right_hand_detected")
         val stats = listOf("mean", "std", "range", "vel_mean", "vel_p95", "log_power", "dom_freq", "band_breath", "band_move", "band_tremor")
@@ -107,9 +107,16 @@ class FeatureEngine(val bs: List<String>, val fm: List<String>) {
         return s
     }
     val signalNames = signals(emptyMap()).keys.toList()
-    val names = signalNames.flatMap { s -> stats.map { "f_${s}_$it" } } +
+    private val availableNames = signalNames.flatMap { s -> stats.map { "f_${s}_$it" } } +
         bs.flatMap { s -> listOf("mean", "std", "max").map { "f_${s}_$it" } } +
         fm.flatMap { s -> listOf("mean", "std").map { "f_${s}_$it" } } + flags.map { "f_${it}_rate" }
+    val names = requestedFeatures?.toList() ?: availableNames
+    private val selected = names.toSet()
+    private val outputIndices = names.map { name -> availableNames.indexOf(name).also {
+        require(it >= 0) { "Unknown feature: $name" }
+    } }
+    private val activeSignals = signalNames.indices.filter { j -> stats.any { "f_${signalNames[j]}_$it" in selected } }
+    init { require(selected.size == names.size) { "Duplicate requested features" } }
 
     // NumPy's contiguous float64 pairwise reduction, including the eight accumulators.
     private fun sum(a: DoubleArray, from: Int = 0, n: Int = a.size): Double {
@@ -155,10 +162,10 @@ class FeatureEngine(val bs: List<String>, val fm: List<String>) {
         require(records.first().time <= start+1e-9 && records.last().time+1e-9 >= start+4)
         val inside = records.filter { it.time >= start && it.time < start+4 }
         val ss = inside.map { signals(it.row).values.toDoubleArray() }
-        val out = ArrayList<Double>(names.size)
-        for (j in signalNames.indices) {
+        val out = DoubleArray(availableNames.size) { Double.NaN }
+        for (j in activeSignals) {
             val valid = inside.indices.filter { ss[it][j].isFinite() }
-            if (valid.size < 2 || valid.size < .5*inside.size) { repeat(10) { out.add(Double.NaN) }; continue }
+            if (valid.size < 2 || valid.size < .5*inside.size) continue
             var k = 0
             val grid = DoubleArray(120) { i ->
                 val t = start+i/30.0
@@ -167,27 +174,33 @@ class FeatureEngine(val bs: List<String>, val fm: List<String>) {
                 if (t <= inside[a].time || a == b) ss[a][j]
                 else ss[a][j]+(ss[b][j]-ss[a][j])/(inside[b].time-inside[a].time)*(t-inside[a].time)
             }
-            out.addAll(signalStats(grid).toList())
+            signalStats(grid).copyInto(out,j*stats.size)
         }
         // Extras use C-contiguous float32 axis-0 nan reductions, as in Python.
+        var offset = signalNames.size*stats.size
         fun extra(name: String, withMax: Boolean) {
+            val n = if (withMax) 3 else 2
+            val first = offset; offset += n
+            if (listOf("mean", "std", "max").take(n).none { "f_${name}_$it" in selected }) return
             val a = inside.map { (it.row[name] ?: Double.NaN).toFloat() }.filter { !it.isNaN() }
-            if (a.isEmpty()) { repeat(if (withMax) 3 else 2) { out.add(Double.NaN) }; return }
+            if (a.isEmpty()) return
             var total = 0f; for (v in a) total += v
             val mean = total/a.size
             var variance = 0f; for (v in a) { val diff = v-mean; variance += diff*diff }
-            out.add(mean.toDouble()); out.add(sqrt(variance/a.size).toDouble())
-            if (withMax) out.add(a.max().toDouble())
+            out[first] = mean.toDouble(); out[first+1] = sqrt(variance/a.size).toDouble()
+            if (withMax) out[first+2] = a.max().toDouble()
         }
         for (name in bs) extra(name,true)
         for (name in fm) extra(name,false)
         for (name in flags) {
+            val first = offset++
+            if ("f_${name}_rate" !in selected) continue
             val a = inside.map { (it.row[name] ?: Double.NaN).toFloat() }.filter { !it.isNaN() }
             var total = 0f; for (v in a) total += v
-            out.add(if (a.isEmpty()) Double.NaN else (total/a.size).toDouble())
+            out[first] = if (a.isEmpty()) Double.NaN else (total/a.size).toDouble()
         }
-        require(out.size == names.size)
-        return out.map { it.toFloat().toDouble() }.toDoubleArray()
+        require(offset == availableNames.size)
+        return DoubleArray(outputIndices.size) { out[outputIndices[it]].toFloat().toDouble() }
     }
 }
 

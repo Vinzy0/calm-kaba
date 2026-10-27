@@ -19,12 +19,14 @@ class BehaviorResult {
   final double threshold;
   final String reason;
   final String warning;
+  final String? modelRun;
   BehaviorResult.fromMap(Map<dynamic, dynamic> map)
     : symptom = map['symptom'] as String,
       score = (map['score'] as num?)?.toDouble(),
       threshold = (map['threshold'] as num).toDouble(),
       reason = map['reason'] as String? ?? '',
-      warning = map['warning'] as String? ?? '';
+      warning = map['warning'] as String? ?? '',
+      modelRun = map['modelRun'] as String?;
   String get label => symptomLabels[symptom] ?? symptom;
   bool get detected => score != null && score!.isFinite && score! >= threshold;
 }

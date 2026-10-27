@@ -2,7 +2,7 @@
 # Anxiety Symptom Screening and Support Application
 
 The Android camera and seven-model integration, build instructions, numerical
-verification, and phone checklist are documented in [CAMERA_INTEGRATION.md](CAMERA_INTEGRATION.md).
+verification, and phone checklist are documented in [RESTRICTED_CONTROL.md](RESTRICTED_CONTROL.md).
 
 ## Personal repository
 
@@ -28,7 +28,7 @@ The application aims to help users explore selected behavioral patterns, access 
 
 ## Features
 
-- **Behavioral detection** analyzes camera landmarks using the seven full-feature vs_everything LightGBM models from the 51-participant run.
+- **Behavioral detection** runs seven restricted-feature vs_control LightGBM models from the 51-participant run. Each classifier receives only its saved symptom-specific feature list. This branch installs separately as **Calm Kaba Control**.
 - **Screening Results** — Displays the results of the system's analysis.
 - **Educational Resources** — Provides information about selected symptoms and their limitations.
 - **Coping Techniques** — Offers supportive techniques such as grounding, breathing regulation, and cognitive reframing.
@@ -58,7 +58,7 @@ Install the following tools:
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/Vinzy0/calm-kaba.git
+   git clone --branch codex/restricted-vs-control https://github.com/Vinzy0/calm-kaba.git
    ```
 
 2. Navigate to the project directory:

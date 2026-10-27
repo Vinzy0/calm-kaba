@@ -37,28 +37,37 @@ void main() {
       expect(rule.accept(result(.9), 117), isFalse);
     },
   );
-  test(
-    'simultaneous detections persist without overwriting each other',
-    () async {
-      SharedPreferences.setMockInitialValues({});
-      final logs = LogService();
-      await Future.wait([
-        logs.addLog('Fidgeting', score: .8, threshold: .5),
-        logs.addLog('Hand Tremor', score: .6, threshold: .5),
-      ]);
-      final saved = await logs.getLogs();
-      expect(saved.map((e) => e.symptom), ['Fidgeting', 'Hand Tremor']);
-      expect(saved.first.score, .8);
-      expect(saved.first.modelRun, contains('/full/vs_everything'));
-      expect(
-        LogEntry.fromMap({
-          'symptom': 'Old log',
-          'timestamp': '2025-01-01T00:00:00',
-        }).score,
-        isNull,
-      );
-    },
-  );
+  test('simultaneous detections persist without overwriting each other', () async {
+    SharedPreferences.setMockInitialValues({});
+    final logs = LogService();
+    await Future.wait([
+      logs.addLog(
+        'Fidgeting',
+        score: .8,
+        threshold: .5,
+        modelRun:
+            '2026-10-27_51participants_full_vs_restricted/restricted/vs_control',
+      ),
+      logs.addLog(
+        'Hand Tremor',
+        score: .6,
+        threshold: .5,
+        modelRun:
+            '2026-10-27_51participants_full_vs_restricted/restricted/vs_control',
+      ),
+    ]);
+    final saved = await logs.getLogs();
+    expect(saved.map((e) => e.symptom), ['Fidgeting', 'Hand Tremor']);
+    expect(saved.first.score, .8);
+    expect(saved.first.modelRun, contains('/restricted/vs_control'));
+    expect(
+      LogEntry.fromMap({
+        'symptom': 'Old log',
+        'timestamp': '2025-01-01T00:00:00',
+      }).score,
+      isNull,
+    );
+  });
   test(
     'instant waits for a valid threshold crossing and ignores later packets',
     () async {

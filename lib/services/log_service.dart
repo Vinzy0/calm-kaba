@@ -45,13 +45,25 @@ class LogService {
 
   Future<void> _writes = Future.value();
 
-  Future<void> addLog(String symptom, {double? score, double? threshold}) {
-    final write = _writes.then((_) => _addLog(symptom, score, threshold));
+  Future<void> addLog(
+    String symptom, {
+    double? score,
+    double? threshold,
+    String? modelRun,
+  }) {
+    final write = _writes.then(
+      (_) => _addLog(symptom, score, threshold, modelRun),
+    );
     _writes = write.catchError((Object _) {});
     return write;
   }
 
-  Future<void> _addLog(String symptom, double? score, double? threshold) async {
+  Future<void> _addLog(
+    String symptom,
+    double? score,
+    double? threshold,
+    String? modelRun,
+  ) async {
     final prefs = await SharedPreferences.getInstance();
     final logs = await _readLogs();
     logs.add(
@@ -60,9 +72,7 @@ class LogService {
         timestamp: DateTime.now(),
         score: score,
         threshold: threshold,
-        modelRun: score == null
-            ? null
-            : '2026-10-27_51participants_full_vs_restricted/full/vs_everything',
+        modelRun: modelRun,
       ),
     );
 

@@ -34,6 +34,7 @@ class DevicePipelineTest {
         checks.jniPredictionsMatchPythonWithMissingInputs()
         checks.recordedWindowsMatchPython()
         checks.windowsResetAndTrackingDoesNotBecomeZeroScore()
+        checks.restrictedSchemasExcludeOtherAnatomy()
         for (name in listOf("adapter.json","jni_predictions.json","kotlin_features.json"))
             File(context.filesDir,"device_$name").writeBytes(File(root,name).readBytes())
     }

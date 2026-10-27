@@ -94,6 +94,7 @@ class _HomePageState extends State<HomePage>
             result.label,
             score: result.score,
             threshold: result.threshold,
+            modelRun: result.modelRun,
           );
         } catch (error) {
           if (mounted) {

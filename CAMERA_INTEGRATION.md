@@ -1,4 +1,10 @@
-# Camera and behavioral model integration
+# Original full-feature integration reference
+
+This document records the full-feature / vs_everything build. The current
+`codex/restricted-vs-control` branch uses seven restricted / vs_control models and
+installs as **Calm Kaba Control**. See [the current branch handoff](RESTRICTED_CONTROL.md)
+for its model counts, verification and installation steps. The measurements below
+belong to the original build unless repeated in that handoff.
 
 App checkout: `C:\Users\VINZ\Documents\calm-kaba`
 

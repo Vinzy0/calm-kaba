@@ -19,6 +19,8 @@ import pyarrow.parquet as pq
 
 APP = Path(__file__).resolve().parents[1]
 RUN_ID = '2026-10-27_51participants_full_vs_restricted'
+FEATURE_VERSION = 'restricted'
+MODE = 'vs_control'
 
 
 def clean(value):
@@ -53,13 +55,15 @@ def main():
     target = assets / 'behavior'
     target.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((run / 'manifest.json').read_text())
+    rules = json.loads((run / 'feature_rules.json').read_text())['restricted']
     table = pd.read_parquet(run / 'features.parquet')
     models = []
     max_error = 0.0
     for symptom in c.SYMPTOMS:
-        source = run / 'models/full' / f'{symptom}_vs_everything.joblib'
+        source = run / 'models' / FEATURE_VERSION / f'{symptom}_{MODE}.joblib'
         b = joblib.load(source)
-        assert (b['run_id'], b['feature_version'], b['mode'], b['symptom']) == (RUN_ID, 'full', 'vs_everything', symptom)
+        assert (b['run_id'], b['feature_version'], b['mode'], b['symptom']) == (RUN_ID, FEATURE_VERSION, MODE, symptom)
+        assert b['features'] == rules[symptom]['features']
         assert b['window'] == c.WINDOW and b['bands'] == c.BANDS
         assert b['dataset_sha256'] == manifest['source_sha256']
         assert b['preprocessing']['common_sha256'] == hashlib.sha256((root/'common.py').read_bytes()).hexdigest()
@@ -80,17 +84,21 @@ def main():
         assert error <= 1e-12
         max_error = max(max_error, error)
         models.append(dict(symptom=symptom, file=path.name, features=b['features'], threshold=b['threshold'],
+                           feature_rationale=rules[symptom]['rationale'],
                            bundle_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
                            model_sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
 
-    features = models[0]['features']
+    features = list(dict.fromkeys(f for model in models for f in model['features']))
     bs = list(dict.fromkeys(re.sub(r'_(mean|std|max)$', '', f[2:]) for f in features if f.startswith('f_bs_')))
     fm = list(dict.fromkeys(re.sub(r'_(mean|std)$', '', f[2:]) for f in features if f.startswith('f_face_matrix_')))
     signals, _ = c.compute_signals({n: np.zeros(1) for n in c.landmark_cols()})
-    assert all(m['features'] == c.feature_names(signals, bs, fm) for m in models)
-    write(target/'manifest.json', dict(run_id=RUN_ID, feature_version='full', mode='vs_everything',
+    extracted_features = c.feature_names(signals, bs, fm)
+    assert set(features) <= set(extracted_features)
+    indices = {name: i for i, name in enumerate(features)}
+    model_indices = [[indices[f] for f in model['features']] for model in models]
+    write(target/'manifest.json', dict(run_id=RUN_ID, feature_version=FEATURE_VERSION, mode=MODE,
         lightgbm_version=lgb.__version__, adapter=w.ADAPTER, window=c.WINDOW, bands=c.BANDS,
-        bs_names=bs, fm_names=fm, models=models, source_sha256=manifest['source_sha256']))
+        bs_names=bs, fm_names=fm, features=features, models=models, source_sha256=manifest['source_sha256']))
     tracking = {}
     for name, sha in w.ASSET_SHA256.items():
         source = root/'tracking_assets'/name
@@ -130,7 +138,8 @@ def main():
                 np.ascontiguousarray(rr[:, offset+len(bs):offset+len(bs)+len(fm)], dtype=np.float32),
                 np.ascontiguousarray(rr[:, -4:], dtype=np.float32), window_starts=[start])
             vals = vals.astype(np.float32)[0]
-            probs = [float(lgb.Booster(model_file=str(target/m['file'])).predict(vals[None, :], num_threads=1)[0]) for m in models]
+            vals = vals[[extracted_features.index(f) for f in features]]
+            probs = [float(lgb.Booster(model_file=str(target/m['file'])).predict(vals[None, model_indices[i]], num_threads=1)[0]) for i,m in enumerate(models)]
             cases.append(dict(name=f'{symptom}_{variant}', start=start, times=tt, columns=columns, rows=rr, features=vals, probabilities=probs))
     write(fixture/'windows.json', cases)
     # Deterministic raw task-result cases independently exercise the adapter.
@@ -160,12 +169,13 @@ def main():
     vectors = table.loc[:, features].iloc[::113].to_numpy(dtype=np.float32)
     vectors = np.vstack([vectors, np.full((1, len(features)), np.nan, dtype=np.float32)])
     vectors[::7, ::3] = np.nan
-    probs = np.column_stack([lgb.Booster(model_file=str(target/m['file'])).predict(vectors, num_threads=1) for m in models])
+    probs = np.column_stack([lgb.Booster(model_file=str(target/m['file'])).predict(vectors[:, model_indices[i]], num_threads=1) for i,m in enumerate(models)])
     write(fixture/'predictions.json', dict(features=vectors, probabilities=probs))
-    write(APP/'.verification/export.json', dict(run_id=RUN_ID, models=7, windows_per_model=len(table),
+    write(APP/'.verification/export.json', dict(run_id=RUN_ID, feature_version=FEATURE_VERSION, mode=MODE,
+        models=7, shared_features=len(features), features_per_model={m['symptom']:len(m['features']) for m in models}, windows_per_model=len(table),
         missing_cases_per_model=32, max_probability_error=max_error, tolerance=1e-12,
         recorded_window_cases=len(cases), lightgbm_version=lgb.__version__))
-    print(f'Exported seven full/vs_everything native models; {len(table)} windows/model + missing cases; max error {max_error}')
+    print(f'Exported seven {FEATURE_VERSION}/{MODE} native models; {len(features)} shared features; {len(table)} windows/model + missing cases; max error {max_error}')
 
 
 if __name__ == '__main__':
