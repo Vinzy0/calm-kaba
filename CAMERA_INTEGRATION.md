@@ -41,6 +41,16 @@ LightGBM 4.7.0 runs through its C API and a small JNI bridge. The exporter calls
 conversion, retraining, heuristic replacement, or old/restricted models are used.
 Model and tracking-asset checksums are checked at startup.
 
+Release builds include the Protobuf Java Lite keep rule in
+`android/app/proguard-rules.pro`. MediaPipe protobuf messages access fields through
+reflection; without this rule R8 can remove `SystemInfo.platform_` and prevent
+camera startup. MediaPipe's native packet callbacks and Flogger's
+`forEnclosingClass()` factory and caller-finder helpers also need preservation: inlining them
+otherwise fails `Graph` initialization with "no caller found on the stack".
+Version 1.0.1+2 includes these rules. Camera failures log their exception chain
+under `CalmCamera` and display the underlying cause. R8 remains enabled. Always
+smoke test camera startup in the actual release APK as well as running debug tests.
+
 Instant mode waits for the first valid threshold crossing, stops the camera, and
 opens the existing result page. If several classifiers fire in that window, the
 highest score chooses the displayed result. Continuous mode displays all seven
