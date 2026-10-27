@@ -3,63 +3,169 @@ import 'dart:async';
 import 'theme/design_system.dart';
 import 'services/detection_service.dart';
 import 'services/log_service.dart';
+import 'services/navigation_observer.dart';
+import 'components/camera_preview.dart';
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final bool active;
+  const HomePage({super.key, this.active = true});
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
-  final PageController _pageController = PageController(initialPage: 0);
+class _HomePageState extends State<HomePage>
+    with WidgetsBindingObserver, RouteAware {
   final DetectionService _detectionService = DetectionService();
   final LogService _logService = LogService();
-
-  StreamSubscription? _detectionSubscription;
+  StreamSubscription<BehaviorResult>? _detectionSubscription;
+  StreamSubscription<Map<dynamic, dynamic>>? _updateSubscription;
+  ModalRoute<void>? _route;
   bool _isDetecting = false;
-  int _selectedTabIndex = 0; // 0 for Instant, 1 for Continuous
+  bool _cameraReady = false;
+  int _selectedTabIndex = 0;
+  String _status =
+      'Keep your face, shoulders, and hands visible. Move back for knees.';
+  List<BehaviorResult> _results = [];
+  double _progress = 0;
+  double? _fps;
+  Map<dynamic, dynamic> _tracking = {};
 
   @override
-  void dispose() {
-    _pageController.dispose();
-    _stopDetection();
-    super.dispose();
-  }
-
-  void _startDetection(DetectionMode mode) {
-    if (_isDetecting) return;
-    setState(() => _isDetecting = true);
-
-    _detectionService.startDetection(mode: mode);
-    _detectionSubscription = _detectionService.detectionStream.listen((symptom) async {
-      if (mode == DetectionMode.instant) {
-        // Stop on first detection and navigate
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _updateSubscription = _detectionService.updates.listen((packet) {
+      if (!mounted ||
+          (!_isDetecting &&
+              packet['type'] != 'stopped' &&
+              packet['type'] != 'error')) {
+        return;
+      }
+      setState(() {
+        switch (packet['type']) {
+          case 'status':
+            _status = packet['message'] as String;
+          case 'error':
+          case 'stopped':
+            _isDetecting = false;
+            _status = packet['message'] as String;
+            _results = [];
+          case 'tracking':
+            _tracking = packet['tracking'] as Map;
+            _progress = (packet['progress'] as num).toDouble();
+            if (packet['interrupted'] == true) {
+              _results = [];
+              _fps = null;
+              _status = 'Tracking was interrupted. Collecting a fresh window.';
+            }
+          case 'prediction':
+            _results = List.of(_detectionService.results);
+            _fps = (packet['fps'] as num).toDouble();
+            final count = _results.where((r) => r.detected).length;
+            _status = count > 0
+                ? '$count behavioral model detection${count == 1 ? '' : 's'} in this window'
+                : _results.any((r) => r.score != null)
+                ? 'No above-threshold behavioral detections in this window'
+                : 'Tracking unavailable. Adjust your position using the guidance below.';
+        }
+      });
+    });
+    _detectionSubscription = _detectionService.detectionStream.listen((
+      result,
+    ) async {
+      if (!mounted || !_isDetecting) return;
+      if (_detectionService.currentMode == DetectionMode.instant) {
         _stopDetection();
         if (mounted) {
           Navigator.pushNamed(
-              context,
-              '/detectionInstant',
-              arguments: symptom
+            context,
+            '/detectionInstant',
+            arguments: {
+              'symptom': result.label,
+              'score': result.score,
+              'threshold': result.threshold,
+            },
           );
         }
       } else {
-        // Continuous mode: log it
-        await _logService.addLog(symptom);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Detected & Logged: $symptom')),
+        try {
+          await _logService.addLog(
+            result.label,
+            score: result.score,
+            threshold: result.threshold,
           );
+        } catch (error) {
+          if (mounted) {
+            setState(
+              () => _status =
+                  'Detection worked, but history could not be saved. $error',
+            );
+          }
         }
       }
     });
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != _route) {
+      if (_route != null) detectionRouteObserver.unsubscribe(this);
+      _route = route;
+      if (route != null) detectionRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant HomePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.active) _stopDetection();
+  }
+
+  @override
+  void didPushNext() => _stopDetection();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _stopDetection();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    detectionRouteObserver.unsubscribe(this);
+    unawaited(_detectionSubscription?.cancel());
+    unawaited(_updateSubscription?.cancel());
+    unawaited(_detectionService.dispose());
+    super.dispose();
+  }
+
+  void _startDetection(DetectionMode mode) {
+    if (_isDetecting || !_cameraReady) return;
+    setState(() {
+      _isDetecting = true;
+      _results = [];
+      _fps = null;
+      _tracking = {};
+      _progress = 0;
+      _status = 'Starting camera and landmark tracking';
+    });
+    unawaited(_detectionService.startDetection(mode: mode));
+  }
+
   void _stopDetection() {
-    setState(() => _isDetecting = false);
-    _detectionService.stopDetection();
-    _detectionSubscription?.cancel();
-    _detectionSubscription = null;
+    if (_isDetecting && mounted) {
+      setState(() {
+        _isDetecting = false;
+        _results = [];
+        _tracking = {};
+        _fps = null;
+        _progress = 0;
+        _status = 'Scan stopped. Tap Scan Now to begin a fresh window.';
+      });
+    }
+    unawaited(_detectionService.stopDetection());
   }
 
   Widget _buildTabButton(String title, int index) {
@@ -70,11 +176,7 @@ class _HomePageState extends State<HomePage> {
           setState(() {
             _selectedTabIndex = index;
           });
-          _pageController.animateToPage(
-            index,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-          );
+          _stopDetection();
         },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -94,125 +196,153 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildCameraPlaceholder(String title, String subtitle, DetectionMode mode) {
-    final isLightMode = Theme.of(context).brightness == Brightness.light;
+  Widget _buildCamera() {
+    final mode = _selectedTabIndex == 0
+        ? DetectionMode.instant
+        : DetectionMode.continuous;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 24),
       decoration: BoxDecoration(
         color: AppColors.elizabeth,
         borderRadius: BorderRadius.circular(24),
-        border: isLightMode ? Border.all(color: AppColors.elizabeth, width: 6) : Border.all(color: AppColors.arden, width: 6),
       ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final imageSize =
-          (constraints.maxWidth * 0.42).clamp(90.0, 150.0);
-
-          return Stack(
-            children: [
-              // Text and button content
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  20,
-                  imageSize * 0.70,
-                  20,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: AppTypography.headlineSmall.copyWith(
-                        color: Colors.white,
-                      ),
-                      softWrap: true,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      subtitle,
-                      style: AppTypography.bodyMedium.copyWith(
-                        color: Colors.white,
-                      ),
-                      softWrap: true,
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ElevatedButton(
-                          onPressed: () {
-                            if (_isDetecting) {
-                              _stopDetection();
-                            } else {
-                              _startDetection(mode);
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isDetecting
-                                ? Colors.red
-                                : AppColors.tertiary,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
-                            ),
-                          ),
-                          child: Text(
-                            _isDetecting ? 'Stop' : 'Scan Now',
-                            style: AppTypography.titleMedium.copyWith(
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: Icon(
-                            Icons.help_outline,
-                            color: Colors.white,
-                            size: 24,
-                          ),
-                          onPressed: () => Navigator.pushNamed(context, '/disclaimer'),
-                          constraints: const BoxConstraints(),
-                          padding: EdgeInsets.zero,
-                          tooltip: 'Disclaimer',
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // Placeholder image
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  width: imageSize,
-                  height: imageSize,
-                  decoration: BoxDecoration(
-                    color: Colors.black12,
-                    borderRadius: const BorderRadius.only(
-                      bottomRight: Radius.circular(20),
-                      topLeft: Radius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+            child: Row(
+              children: [
+                ElevatedButton(
+                  onPressed: _isDetecting
+                      ? _stopDetection
+                      : _cameraReady
+                      ? () => _startDetection(mode)
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.tertiary,
+                    foregroundColor: AppColors.textPrimary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
                     ),
                   ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.image,
-                      size: 50,
-                      color: Colors.white54,
+                  child: Text(_isDetecting ? 'Stop' : 'Scan Now'),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(
+                    Icons.help_outline,
+                    color: AppColors.textPrimary,
+                  ),
+                  tooltip: 'Disclaimer',
+                  onPressed: () => Navigator.pushNamed(context, '/disclaimer'),
+                ),
+              ],
+            ),
+          ),
+          AspectRatio(
+            aspectRatio: 3 / 4,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                BehaviorCameraPreview(
+                  onReady: () {
+                    if (mounted) setState(() => _cameraReady = true);
+                  },
+                ),
+                if (!_isDetecting)
+                  const ColoredBox(
+                    color: Colors.black,
+                    child: Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Text(
+                          'Tap Scan Now to open the camera',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      ),
                     ),
                   ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  mode == DetectionMode.instant
+                      ? 'Instant Scan'
+                      : 'Continuous Scan',
+                  style: AppTypography.headlineSmall.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
                 ),
-              ),
-            ],
-          );
-        },
+                const SizedBox(height: 8),
+                Text(
+                  _status,
+                  style: AppTypography.bodyMedium.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                  semanticsLabel: 'Scan status. $_status',
+                ),
+                if (_isDetecting) ...[
+                  const SizedBox(height: 12),
+                  LinearProgressIndicator(
+                    value: _progress,
+                    color: AppColors.textPrimary,
+                    backgroundColor: Colors.white24,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Face: ${_tracking['face'] == true ? 'tracked' : 'unavailable'}  '
+                    'Body: ${_tracking['body'] == true ? 'tracked' : 'unavailable'}'
+                    '${_fps == null ? '' : '  ${_fps!.toStringAsFixed(1)} FPS'}',
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+                if (_results.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Latest four-second window',
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  ..._results.map(
+                    (r) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        r.score == null
+                            ? '${r.label}: unavailable. ${r.reason}'
+                            : '${r.label}: ${r.detected ? 'detected' : 'below threshold'} '
+                                  '${(r.score! * 100).toStringAsFixed(1)}%'
+                                  '${r.warning.isEmpty ? '' : '. ${r.warning}'}',
+                        style: AppTypography.bodySmall.copyWith(
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Text(
+                  'Behavioral model scores are not a diagnosis. Video is not saved.',
+                  style: AppTypography.bodySmall.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -237,13 +367,17 @@ class _HomePageState extends State<HomePage> {
                   Text(
                     title,
                     softWrap: true,
-                    style: AppTypography.titleLarge.copyWith(color: Colors.white),
+                    style: AppTypography.titleLarge.copyWith(
+                      color: Colors.white,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     subtitle,
                     softWrap: true,
-                    style: AppTypography.bodySmall.copyWith(color: Colors.white),
+                    style: AppTypography.bodySmall.copyWith(
+                      color: Colors.white,
+                    ),
                   ),
                 ],
               ),
@@ -264,11 +398,11 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildCopingCard(
-      String title,
-      String subtitle,
-      String route,
-      double cardWidth,
-      ) {
+    String title,
+    String subtitle,
+    String route,
+    double cardWidth,
+  ) {
     final isLightMode = Theme.of(context).brightness == Brightness.light;
     return GestureDetector(
       onTap: () => Navigator.pushNamed(context, route),
@@ -306,10 +440,16 @@ class _HomePageState extends State<HomePage> {
               child: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: isLightMode ? AppColors.pinkCarnation : AppColors.primary,
+                  color: isLightMode
+                      ? AppColors.pinkCarnation
+                      : AppColors.primary,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.chevron_right, color: Colors.white, size: 20),
+                child: const Icon(
+                  Icons.chevron_right,
+                  color: Colors.white,
+                  size: 20,
+                ),
               ),
             ),
           ],
@@ -337,12 +477,16 @@ class _HomePageState extends State<HomePage> {
                   children: [
                     Text(
                       'You are safe here.',
-                      style: AppTypography.headlineMedium.copyWith(color: AppColors.primary),
+                      style: AppTypography.headlineMedium.copyWith(
+                        color: AppColors.primary,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'Take a slow breath. We\'ll gently check in on your posture, breathing rhythm, and micro-tension.',
-                      style: AppTypography.bodyMedium.copyWith(color: AppColors.primary),
+                      style: AppTypography.bodyMedium.copyWith(
+                        color: AppColors.primary,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     Row(
@@ -350,16 +494,22 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         Text(
                           'Switch to Simple Mode',
-                          style: AppTypography.titleSmall.copyWith(color: AppColors.primary),
+                          style: AppTypography.titleSmall.copyWith(
+                            color: AppColors.primary,
+                          ),
                         ),
                         const SizedBox(width: 8),
                         Switch(
                           value: isLightMode,
-                          activeTrackColor: AppColors.primary.withValues(alpha: 0.5),
+                          activeTrackColor: AppColors.primary.withValues(
+                            alpha: 0.5,
+                          ),
                           activeThumbColor: AppColors.primary,
                           inactiveThumbColor: AppColors.primary,
                           onChanged: (value) {
-                            AppTheme.themeModeNotifier.value = value ? ThemeMode.light : ThemeMode.dark;
+                            AppTheme.themeModeNotifier.value = value
+                                ? ThemeMode.light
+                                : ThemeMode.dark;
                           },
                         ),
                         const SizedBox(width: 8),
@@ -380,7 +530,9 @@ class _HomePageState extends State<HomePage> {
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).extension<AppColorsExtension>()!.cardBackground,
+                    color: Theme.of(
+                      context,
+                    ).extension<AppColorsExtension>()!.cardBackground,
                     borderRadius: BorderRadius.circular(30),
                   ),
                   child: Row(
@@ -394,32 +546,7 @@ class _HomePageState extends State<HomePage> {
 
               const SizedBox(height: 24),
 
-              // PageView for Camera modes
-              SizedBox(
-                height: 220,
-                child: PageView(
-                  controller: _pageController,
-                  onPageChanged: (index) {
-                    setState(() {
-                      _selectedTabIndex = index;
-                    });
-                    _stopDetection();
-                  },
-                  children: [
-                    _buildCameraPlaceholder(
-                        'Instant Scan',
-                        'Displays the first detected symptom',
-                        DetectionMode.instant
-                    ),
-                    _buildCameraPlaceholder(
-                        'Continuous Scan',
-                        'Logs all detections in the background',
-                        DetectionMode.continuous
-                    ),
-                  ],
-                ),
-              ),
-
+              _buildCamera(),
               const SizedBox(height: 32),
 
               // Insights Section
@@ -427,19 +554,21 @@ class _HomePageState extends State<HomePage> {
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Text(
                   'Insights',
-                  style: AppTypography.titleMedium.copyWith(color: AppColors.arden),
+                  style: AppTypography.titleMedium.copyWith(
+                    color: AppColors.arden,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
               _buildInsightCard(
-                  'Symptoms Info',
-                  'Get more detailed info of the symptoms you can detect through this app.',
-                  '/symptomList'
+                'Symptoms Info',
+                'Get more detailed info of the symptoms you can detect through this app.',
+                '/symptomList',
               ),
               _buildInsightCard(
-                  'Your Log',
-                  'This is where you find your detection history.',
-                  '/detectionLog'
+                'Your Log',
+                'This is where you find your detection history.',
+                '/detectionLog',
               ),
 
               const SizedBox(height: 32),
@@ -454,15 +583,20 @@ class _HomePageState extends State<HomePage> {
                         'Coping Techniques',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: AppTypography.titleMedium.copyWith(color: AppColors.arden),
+                        style: AppTypography.titleMedium.copyWith(
+                          color: AppColors.arden,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     GestureDetector(
-                      onTap: () => Navigator.pushNamed(context, '/copingTechniques'),
+                      onTap: () =>
+                          Navigator.pushNamed(context, '/copingTechniques'),
                       child: Text(
                         'See all',
-                        style: AppTypography.titleSmall.copyWith(color: AppColors.primary),
+                        style: AppTypography.titleSmall.copyWith(
+                          color: AppColors.primary,
+                        ),
                       ),
                     ),
                   ],
@@ -474,7 +608,10 @@ class _HomePageState extends State<HomePage> {
               LayoutBuilder(
                 builder: (context, constraints) {
                   final screenHeight = MediaQuery.of(context).size.height;
-                  final cardWidth = (constraints.maxWidth * 0.42).clamp(145.0, 220.0);
+                  final cardWidth = (constraints.maxWidth * 0.42).clamp(
+                    145.0,
+                    220.0,
+                  );
                   final cardHeight = (screenHeight * 0.20).clamp(200.0, 260.0);
 
                   return SizedBox(

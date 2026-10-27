@@ -1,0 +1,5 @@
+# These deployment assets are checksum-verified at startup.
+# Keep their bytes identical when checking out on Windows or Unix.
+android/app/src/main/assets/behavior/*.txt -text
+android/app/src/main/assets/behavior/*.json -text
+android/app/src/main/assets/tracking/*.task -text

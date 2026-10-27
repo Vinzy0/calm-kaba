@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'theme/design_system.dart';
-import 'services/detection_service.dart';
 
 class SymptomListPage extends StatefulWidget {
   final bool isBottomNav;

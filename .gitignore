@@ -43,3 +43,21 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Downloaded upstream source and local research verification inputs.
+# Deployable behavior and tracking assets are versioned in the personal copy.
+/android/app/src/main/cpp/LightGBM/
+/android/app/src/test/resources/parity/
+/.verification/
+/.impeccable/
+**/__pycache__/
+
+# Research datasets, installers and credentials stay local.
+*.parquet
+*.csv
+*.csv.gz
+*.joblib
+*.apk
+*.aab
+.env
+.env.*

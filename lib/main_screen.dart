@@ -14,18 +14,16 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
 
-  final List<Widget> _pages = [
-    const HomePage(),
-    const SymptomListPage(isBottomNav: true),
-    const CopingTechniquesPage(isBottomNav: true),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _pages,
+        children: [
+          HomePage(active: _currentIndex == 0),
+          const SymptomListPage(isBottomNav: true),
+          const CopingTechniquesPage(isBottomNav: true),
+        ],
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(

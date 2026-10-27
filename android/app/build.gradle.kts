@@ -24,10 +24,12 @@ android {
         applicationId = "com.example.thesis_anxiety"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        externalNativeBuild { cmake { arguments.add("-DANDROID_STL=c++_shared"); targets.add("calm_lgbm") } }
     }
 
     buildTypes {
@@ -37,6 +39,29 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            it.systemProperty("java.library.path", file("../../.verification/native-host/Release").absolutePath)
+        }
+    }
+    sourceSets.getByName("androidTest") {
+        java.srcDir("src/test/kotlin")
+        assets.srcDir("src/test/resources")
+    }
+}
+
+dependencies {
+    val cameraX = "1.4.2"
+    implementation("androidx.camera:camera-camera2:$cameraX")
+    implementation("androidx.camera:camera-lifecycle:$cameraX")
+    implementation("androidx.camera:camera-view:$cameraX")
+    implementation("com.google.mediapipe:tasks-vision:0.10.33")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("junit:junit:4.13.2")
 }
 
 flutter {

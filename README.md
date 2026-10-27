@@ -1,9 +1,26 @@
 
 # Anxiety Symptom Screening and Support Application
 
+The Android camera and seven-model integration, build instructions, numerical
+verification, and phone checklist are documented in [CAMERA_INTEGRATION.md](CAMERA_INTEGRATION.md).
+
+## Personal repository
+
+This private copy belongs to [Vinzy0/calm-kaba](https://github.com/Vinzy0/calm-kaba).
+The original app is [kiri-ye/calm-kaba](https://github.com/kiri-ye/calm-kaba).
+The original repository is available locally as `upstream`, with pushing disabled.
+
+| Branch | Models |
+| --- | --- |
+| `codex/camera-behavior-integration` | Seven full-feature models, each symptom vs everything else |
+| `codex/restricted-vs-control` | Seven symptom-restricted models, each symptom vs control |
+
+The deployable model and tracking assets are included. Participant datasets,
+recorded research fixtures and local verification files are excluded.
+
 ## Overview
 
-Thesis_Anxiety is a Flutter-based mobile application designed to screen for selected anxiety-related behavioral indicators using computer vision and deep learning.
+Calm Kaba is a Flutter Android application that detects selected behavioral indicators using MediaPipe landmarks and seven independent LightGBM classifiers.
 
 The application aims to help users explore selected behavioral patterns, access educational information about anxiety-related symptoms, and learn coping techniques that may support their well-being.
 
@@ -11,7 +28,7 @@ The application aims to help users explore selected behavioral patterns, access 
 
 ## Features
 
-- **Symptom Screening** — Analyzes selected anxiety-related behavioral indicators using a deep learning model.
+- **Behavioral detection** analyzes camera landmarks using the seven full-feature vs_everything LightGBM models from the 51-participant run.
 - **Screening Results** — Displays the results of the system's analysis.
 - **Educational Resources** — Provides information about selected symptoms and their limitations.
 - **Coping Techniques** — Offers supportive techniques such as grounding, breathing regulation, and cognitive reframing.
@@ -22,10 +39,8 @@ The application aims to help users explore selected behavioral patterns, access 
 
 - **Flutter** — Cross-platform mobile application framework
 - **Dart** — Programming language
-- **MediaPipe** — Visual landmark and movement feature extraction, where applicable
-- **Computer Vision and Deep Learning** — Analysis and classification of selected behavioral indicators
-
-*Update this list to match the libraries and models actually used in the project.*
+- **CameraX and MediaPipe Tasks** supply an Android camera preview, face/iris, pose, hand, blendshape, and transformation-matrix outputs.
+- **LightGBM 4.7.0** runs exported native models through JNI, with Kotlin normalization and window features verified against Python.
 
 ## Getting Started
 
@@ -43,18 +58,19 @@ Install the following tools:
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/YOUR-USERNAME/Thesis_Anxiety.git
+   git clone https://github.com/Vinzy0/calm-kaba.git
    ```
 
 2. Navigate to the project directory:
 
    ```bash
-   cd Thesis_Anxiety
+   cd calm-kaba
    ```
 
-3. Install dependencies:
+3. Prepare the pinned native library and install dependencies:
 
    ```bash
+   ./tools/setup_native.ps1
    flutter pub get
    ```
 
@@ -100,7 +116,7 @@ Users should consult qualified healthcare professionals regarding concerns about
 
 ## Privacy and Data Handling
 
-The handling of camera recordings, extracted features, and screening results depends on the application's implementation.
+Camera frames and rolling landmark windows stay in memory. The app does not record video or upload camera data. Continuous mode stores detection events locally, including symptom label, timestamp, score, threshold, and model-run identity. A user can export or clear this history in the existing log screen.
 
 Sensitive information, participant recordings, private datasets, API keys, and credentials should not be committed to this repository without appropriate authorization and safeguards.
 
