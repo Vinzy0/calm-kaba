@@ -144,7 +144,8 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         if (activeDelegate[task] != "GPU") throw e
         Log.w("CalmCamera", "$task GPU inference failed; switching to CPU", e)
         fallback[task] = "inference: ${e.javaClass.simpleName}: ${e.message?.take(120)}"
-        (current() as? AutoCloseable)?.close()
+        // Closing a failed GPU graph rethrows its error; the CPU replacement must still start.
+        runCatching { (current() as? AutoCloseable)?.close() }
         run(replace())
     }
     private fun fail(id: Int, error: Throwable) {
@@ -277,8 +278,8 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         if (!worker.isShutdown) worker.execute { closeModels() }
     }
     private fun closeModels() {
-        val closing = listOf(on(faceThread) { face?.close(); face = null }, on(poseThread) { pose?.close(); pose = null },
-            on(handThread) { hands?.close(); hands = null })
+        val closing = listOf(on(faceThread) { runCatching { face?.close() }; face = null }, on(poseThread) { runCatching { pose?.close() }; pose = null },
+            on(handThread) { runCatching { hands?.close() }; hands = null })
         closing.forEach { runCatching { it.get() } }
         bank?.close(); bank = null; window.reset(); lastMs = -1
     }
