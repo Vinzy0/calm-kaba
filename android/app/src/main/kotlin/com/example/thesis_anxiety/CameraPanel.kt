@@ -13,6 +13,7 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.PowerManager
+import android.os.Process
 import android.os.SystemClock
 import android.os.Looper
 import android.util.Range
@@ -47,6 +48,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Future
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -62,14 +64,14 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     val diag = Diagnostics()
     private val overlay = LandmarkOverlay(activity) { ts -> diag.age(ts)?.let { diag.stage("overlayAge",it) } }
     private val main = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor()
+    private val worker = Executors.newSingleThreadExecutor(trackingThreadFactory("calm-analysis"))
     private val generation = AtomicInteger()
     private var provider: ProcessCameraProvider? = null
     private var analysis: ImageAnalysis? = null
     private var bank: ModelBank? = null
-    private val faceThread = Executors.newSingleThreadExecutor()
-    private val poseThread = Executors.newSingleThreadExecutor()
-    private val handThread = Executors.newSingleThreadExecutor()
+    private val faceThread = Executors.newSingleThreadExecutor(trackingThreadFactory("calm-face"))
+    private val poseThread = Executors.newSingleThreadExecutor(trackingThreadFactory("calm-pose"))
+    private val handThread = Executors.newSingleThreadExecutor(trackingThreadFactory("calm-hands"))
     private fun <T> on(thread: ExecutorService, block: () -> T) = thread.submit(Callable(block))
     @Volatile private var face: FaceLandmarker? = null
     @Volatile private var pose: PoseLandmarker? = null
@@ -284,7 +286,8 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         if (diag.input.isEmpty()) diag.input = mapOf("analysis" to "${image.width}x${image.height}",
             "crop" to "${crop.width()}x${crop.height()}", "modelInput" to "${rotated.width}x${rotated.height}",
             "rotation" to image.imageInfo.rotationDegrees, "format" to "RGBA_8888", "camera" to if (mirrored) "front" else "back",
-            "bitmapReuse" to (original === rgbaBuffer.bitmap), "rowStride" to image.planes.firstOrNull()?.rowStride)
+            "bitmapReuse" to (original === rgbaBuffer.bitmap), "rowStride" to image.planes.firstOrNull()?.rowStride,
+            "workerPriority" to Process.getThreadPriority(Process.myTid()))
         try {
             val ms = maxOf(lastMs+1,image.imageInfo.timestamp/1_000_000)
             val interrupted = lastMs >= 0 && ms-lastMs > 500
@@ -350,6 +353,14 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         worker.shutdown()
         activity.detachPanel(this)
     }
+}
+
+internal fun trackingThreadFactory(name: String) = ThreadFactory { task ->
+    Thread({
+        try { Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY) }
+        catch (e: SecurityException) { Log.w("CalmCamera", "Display priority unavailable for $name; using default", e) }
+        task.run()
+    }, name)
 }
 
 /** Owned by the single analysis worker, including resize and stop/dispose cleanup. */

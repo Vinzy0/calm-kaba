@@ -1,6 +1,11 @@
 # Performance, tracking and model study (2026-10-28)
 
-Version 1.1.0+3. Emulator results only; physical-phone measurements are still outstanding.
+Original study: version 1.1.0+3. Emulator results only; physical-phone measurements are still outstanding.
+
+Camera follow-up, version 1.1.2+5: [camera speed results and phone checklist](CAMERA_SPEED_RESULTS.md).
+RGBA bitmap reuse and higher worker priority are implemented. MediaPipe rotation
+remains blocked after its landmark/feature preservation check failed; see
+[rotation comparison](ROTATION_PARITY.md). Sustained 20+ processed fps has not been demonstrated.
 
 ## Branches (Vinzy0/calm-kaba)
 
