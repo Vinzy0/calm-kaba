@@ -15,6 +15,7 @@ class MainActivity : FlutterActivity() {
     private var panel: CameraPanel? = null
     private var sink: EventChannel.EventSink? = null
     private var diagnostics = false
+    private var trackingDelegate = "CPU"
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
@@ -25,13 +26,14 @@ class MainActivity : FlutterActivity() {
         flutterEngine.platformViewsController.registry.registerViewFactory("calm/camera",object : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
             override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
                 panel?.stop()
-                return CameraPanel(this@MainActivity) { sink?.success(it) }.also { panel = it; it.diagnosticsEnabled = diagnostics }
+                return CameraPanel(this@MainActivity) { sink?.success(it) }.also { panel = it; it.diagnosticsEnabled = diagnostics; it.requestedDelegate = trackingDelegate }
             }
         })
         MethodChannel(messenger,"calm/detection").setMethodCallHandler { call,result ->
             when (call.method) {
                 "start" -> if (panel == null) result.error("camera_not_ready","Wait for the preview to open",null) else { panel!!.start(); result.success(null) }
                 "stop" -> { panel?.stop(); result.success(null) }
+                "delegate" -> { trackingDelegate = if (call.arguments == "GPU") "GPU" else "CPU"; panel?.requestedDelegate = trackingDelegate; result.success(null) }
                 "diagnostics" -> { diagnostics = call.arguments == true; panel?.diagnosticsEnabled = diagnostics; result.success(null) }
                 else -> result.notImplemented()
             }

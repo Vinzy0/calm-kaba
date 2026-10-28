@@ -162,6 +162,15 @@ class DetectionService {
     }
   }
 
+  /// Requested MediaPipe delegate for the next scan; the panel reports what runs.
+  Future<void> setDelegate(bool gpu) async {
+    try {
+      await _methods.invokeMethod<void>('delegate', gpu ? 'GPU' : 'CPU');
+    } on MissingPluginException {
+      /* Non-Android widget tests have no camera. */
+    }
+  }
+
   Future<void> setDiagnostics(bool enabled) async {
     if (!enabled) diagnostics.value = null;
     try {

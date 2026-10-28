@@ -25,6 +25,7 @@ class _HomePageState extends State<HomePage>
   bool _isDetecting = false;
   bool _cameraReady = false;
   bool _developerMode = false;
+  bool _gpuDelegate = false;
   int _selectedTabIndex = 0;
   String _status =
       'Keep your face, shoulders, and hands visible. Move back for knees.';
@@ -359,6 +360,28 @@ class _HomePageState extends State<HomePage>
                     ),
                   ],
                 ),
+                if (_developerMode)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'GPU delegate (experimental, applies on next scan)',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Switch(
+                        value: _gpuDelegate,
+                        onChanged: _isDetecting
+                            ? null
+                            : (value) {
+                                setState(() => _gpuDelegate = value);
+                                unawaited(_detectionService.setDelegate(value));
+                              },
+                      ),
+                    ],
+                  ),
                 if (_developerMode)
                   DiagnosticsPanel(source: _detectionService.diagnostics),
                 const SizedBox(height: 12),

@@ -5,12 +5,14 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import org.json.JSONObject
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
 import kotlin.math.abs
@@ -96,5 +98,45 @@ class DevicePipelineTest {
                 assertTrue("Hand XYZ difference $error",error <= .005)
             } finally { handImage.close(); handBitmap.recycle() }
         } finally { face.close(); pose.close(); hands.close(); bank.close(); image.close(); bitmap.recycle() }
+    }
+
+    /**
+     * CPU and GPU delegates may differ numerically. Preselected bounds: normalized
+     * landmark XY 0.01, blendshapes 0.05, matrix 0.2, and adapter (inter-ocular units)
+     * 0.03. Skips with the reason when no GPU delegate can be created (e.g. emulator).
+     */
+    @Test fun gpuDelegateMatchesCpuOnReferenceImage() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val bitmap = instrumentation.context.assets.open("parity/portrait.jpg").use { BitmapFactory.decodeStream(it) }
+        val image = BitmapImageBuilder(bitmap).build()
+        fun face(d: Delegate) = FaceLandmarker.createFromOptions(context,FaceLandmarker.FaceLandmarkerOptions.builder()
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("tracking/face_landmarker.task").setDelegate(d).build())
+            .setRunningMode(RunningMode.IMAGE).setNumFaces(1).setOutputFaceBlendshapes(true).setOutputFacialTransformationMatrixes(true).build())
+        fun pose(d: Delegate) = PoseLandmarker.createFromOptions(context,PoseLandmarker.PoseLandmarkerOptions.builder()
+            .setBaseOptions(BaseOptions.builder().setModelAssetPath("tracking/pose_landmarker_lite.task").setDelegate(d).build())
+            .setRunningMode(RunningMode.IMAGE).build())
+        val gpu = try { face(Delegate.GPU) to pose(Delegate.GPU) } catch (e: Throwable) {
+            File(context.filesDir,"device_gpu.json").writeText(JSONObject(mapOf("gpu" to false,"reason" to e.toString())).toString(2))
+            null
+        }
+        assumeTrue("GPU delegate unavailable on this device",gpu != null)
+        val cpu = face(Delegate.CPU) to pose(Delegate.CPU)
+        try {
+            val fc = cpu.first.detect(image); val fg = gpu!!.first.detect(image)
+            val pc = cpu.second.detect(image); val pg = gpu.second.detect(image)
+            var xy = 0.0; var blend = 0.0; var matrix = 0.0; var poseXy = 0.0; var adapted = 0.0
+            fc.faceLandmarks()[0].zip(fg.faceLandmarks()[0]).forEach { (a,b) -> xy = maxOf(xy,abs(a.x()-b.x()).toDouble(),abs(a.y()-b.y()).toDouble()) }
+            fc.faceBlendshapes().get()[0].zip(fg.faceBlendshapes().get()[0]).forEach { (a,b) -> blend = maxOf(blend,abs(a.score()-b.score()).toDouble()) }
+            fc.facialTransformationMatrixes().get()[0].zip(fg.facialTransformationMatrixes().get()[0]).forEach { (a,b) -> matrix = maxOf(matrix,abs(a-b).toDouble()) }
+            pc.landmarks()[0].zip(pg.landmarks()[0]).forEach { (a,b) -> poseXy = maxOf(poseXy,abs(a.x()-b.x()).toDouble(),abs(a.y()-b.y()).toDouble()) }
+            fun pts(r: List<NormalizedLandmark>) = r.map { Point3(it.x().toDouble(),it.y().toDouble(),it.z().toDouble(),it.visibility().orElse(1f).toDouble(),it.presence().orElse(1f).toDouble()) }
+            val a = LandmarkAdapter.adapt(0.0,pts(fc.faceLandmarks()[0]),pts(pc.landmarks()[0]),emptyList(),emptyMap(),null,emptyList(),emptyList())
+            val b = LandmarkAdapter.adapt(0.0,pts(fg.faceLandmarks()[0]),pts(pg.landmarks()[0]),emptyList(),emptyMap(),null,emptyList(),emptyList())
+            for ((k,v) in a.row) if (k.startsWith("face_") || k.startsWith("pose_")) adapted = maxOf(adapted,abs(v-(b.row[k] ?: Double.NaN)))
+            val report = JSONObject(mapOf("gpu" to true,"face_xy" to xy,"blendshapes" to blend,"matrix" to matrix,"pose_xy" to poseXy,"adapted" to adapted))
+            File(context.filesDir,"device_gpu.json").writeText(report.toString(2))
+            assertTrue(report.toString(),xy <= .01 && poseXy <= .01 && blend <= .05 && matrix <= .2 && adapted <= .03)
+        } finally { listOf(cpu.first,cpu.second,gpu!!.first,gpu.second).forEach { it.close() }; image.close(); bitmap.recycle() }
     }
 }

@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import com.google.mediapipe.framework.image.BitmapImageBuilder
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
+import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarker
 import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
@@ -69,6 +70,14 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     private var lastMs = -1L
     @Volatile private var disposed = false
     @Volatile private var running = false
+    /** Requested MediaPipe delegate for the next start ("CPU" or "GPU"). */
+    @Volatile var requestedDelegate = "CPU"
+    private val activeDelegate = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val fallback = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private fun publishDelegates() {
+        diag.delegates = mapOf("requested" to requestedDelegate, "face" to activeDelegate["face"], "pose" to activeDelegate["pose"],
+            "hands" to activeDelegate["hands"], "fallback" to fallback.entries.joinToString("; ") { "${it.key}: ${it.value}" })
+    }
     @Volatile var diagnosticsEnabled = false
         set(value) { field = value; if (value && running) scheduleDiagnostics(generation.get()) }
     private fun scheduleDiagnostics(id: Int) {
@@ -91,7 +100,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         running = true
         val id = generation.incrementAndGet()
         diag.reset()
-        diag.delegates = mapOf("requested" to "CPU", "face" to "CPU", "pose" to "CPU", "hands" to "CPU", "fallback" to "")
+        activeDelegate.clear(); fallback.clear(); publishDelegates()
         if (diagnosticsEnabled) scheduleDiagnostics(id)
         event(id,mapOf("type" to "status", "message" to "Starting camera and landmark tracking"))
         worker.execute {
@@ -103,19 +112,40 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
                     val bytes = activity.assets.open("tracking/$name").use { it.readBytes() }
                     require(ModelBank.sha256(bytes) == sources.getJSONObject(name).getString("sha256")) { "Tracking asset checksum failed: $name" }
                 }
-                fun base(name: String) = BaseOptions.builder().setModelAssetPath("tracking/$name").build()
-                val f = on(faceThread) { FaceLandmarker.createFromOptions(activity,FaceLandmarker.FaceLandmarkerOptions.builder()
-                    .setBaseOptions(base("face_landmarker.task")).setRunningMode(RunningMode.VIDEO).setNumFaces(1)
-                    .setOutputFaceBlendshapes(true).setOutputFacialTransformationMatrixes(true).build()).also { face = it } }
-                val p = on(poseThread) { PoseLandmarker.createFromOptions(activity,PoseLandmarker.PoseLandmarkerOptions.builder()
-                    .setBaseOptions(base("pose_landmarker_lite.task")).setRunningMode(RunningMode.VIDEO).setNumPoses(1).build()).also { pose = it } }
-                val h = on(handThread) { HandLandmarker.createFromOptions(activity,HandLandmarker.HandLandmarkerOptions.builder()
-                    .setBaseOptions(base("hand_landmarker.task")).setRunningMode(RunningMode.VIDEO).setNumHands(2).build()).also { hands = it } }
+                val gpu = requestedDelegate == "GPU"
+                val f = on(faceThread) { face = createFace(gpu) }
+                val p = on(poseThread) { pose = createPose(gpu) }
+                val h = on(handThread) { hands = createHands(gpu) }
                 f.get(); p.get(); h.get()
                 window.reset(); lastMs = -1
                 main.post { if (!disposed && generation.get() == id) bindCamera(id) }
             } catch (e: Throwable) { fail(id,e) }
         }
+    }
+    private fun base(name: String, gpu: Boolean) = BaseOptions.builder().setModelAssetPath("tracking/$name")
+        .setDelegate(if (gpu) Delegate.GPU else Delegate.CPU).build()
+    /** Try GPU on the calling (task) thread; fall back to CPU and record why. */
+    private fun <T> withFallback(task: String, gpu: Boolean, create: (Boolean) -> T): T {
+        if (gpu) try { return create(true).also { activeDelegate[task] = "GPU"; publishDelegates() } } catch (e: Throwable) {
+            Log.w("CalmCamera", "$task GPU delegate unavailable; using CPU", e)
+            fallback[task] = "create: ${e.javaClass.simpleName}: ${e.message?.take(120)}"
+        }
+        return create(false).also { activeDelegate[task] = "CPU"; publishDelegates() }
+    }
+    private fun createFace(gpu: Boolean) = withFallback("face", gpu) { g -> FaceLandmarker.createFromOptions(activity,FaceLandmarker.FaceLandmarkerOptions.builder()
+        .setBaseOptions(base("face_landmarker.task",g)).setRunningMode(RunningMode.VIDEO).setNumFaces(1)
+        .setOutputFaceBlendshapes(true).setOutputFacialTransformationMatrixes(true).build()) }
+    private fun createPose(gpu: Boolean) = withFallback("pose", gpu) { g -> PoseLandmarker.createFromOptions(activity,PoseLandmarker.PoseLandmarkerOptions.builder()
+        .setBaseOptions(base("pose_landmarker_lite.task",g)).setRunningMode(RunningMode.VIDEO).setNumPoses(1).build()) }
+    private fun createHands(gpu: Boolean) = withFallback("hands", gpu) { g -> HandLandmarker.createFromOptions(activity,HandLandmarker.HandLandmarkerOptions.builder()
+        .setBaseOptions(base("hand_landmarker.task",g)).setRunningMode(RunningMode.VIDEO).setNumHands(2).build()) }
+    /** A GPU task that fails at inference is replaced by a CPU task on the same thread. */
+    private fun <T, R> runOrFallback(task: String, current: () -> T?, replace: () -> T, run: (T) -> R): R = try { run(current()!!) } catch (e: Throwable) {
+        if (activeDelegate[task] != "GPU") throw e
+        Log.w("CalmCamera", "$task GPU inference failed; switching to CPU", e)
+        fallback[task] = "inference: ${e.javaClass.simpleName}: ${e.message?.take(120)}"
+        (current() as? AutoCloseable)?.close()
+        run(replace())
     }
     private fun fail(id: Int, error: Throwable) {
         Log.e("CalmCamera", "Camera detection failed", error)
@@ -203,9 +233,9 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
             lastMs = ms
             // The tasks only read the shared input image.
             fun <T> timed(name: String, block: () -> T): T { val t = System.nanoTime(); return block().also { diag.stage(name,System.nanoTime()-t) } }
-            val ff = on(faceThread) { timed("face") { face!!.detectForVideo(mpImage,ms) } }
-            val pf = on(poseThread) { timed("pose") { pose!!.detectForVideo(mpImage,ms) } }
-            val hf = on(handThread) { timed("hands") { hands!!.detectForVideo(mpImage,ms) } }
+            val ff = on(faceThread) { timed("face") { runOrFallback("face",{ face },{ createFace(false).also { face = it } }) { it.detectForVideo(mpImage,ms) } } }
+            val pf = on(poseThread) { timed("pose") { runOrFallback("pose",{ pose },{ createPose(false).also { pose = it } }) { it.detectForVideo(mpImage,ms) } } }
+            val hf = on(handThread) { timed("hands") { runOrFallback("hands",{ hands },{ createHands(false).also { hands = it } }) { it.detectForVideo(mpImage,ms) } } }
             val f = ff.get(); val p = pf.get(); val h = hf.get(); lap("tracking")
             val fp = f.faceLandmarks().firstOrNull()?.let { points(it) } ?: emptyList()
             val pp = p.landmarks().firstOrNull()?.let { points(it) } ?: emptyList()
