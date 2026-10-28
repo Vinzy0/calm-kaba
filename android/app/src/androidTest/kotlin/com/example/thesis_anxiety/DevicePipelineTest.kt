@@ -30,11 +30,11 @@ class DevicePipelineTest {
         copyFolder("behavior",File(root,"assets/behavior"))
         copyFolder("parity",File(root,"fixtures"),true)
         val checks = PipelineParityTest().configure(File(root,"assets"),File(root,"fixtures"),root)
-        checks.rawTaskResultsMatchPythonAdapter()
+        checks.rawTaskResultsMatchDatasetExporter()
         checks.jniPredictionsMatchPythonWithMissingInputs()
         checks.recordedWindowsMatchPython()
         checks.windowsResetAndTrackingDoesNotBecomeZeroScore()
-        for (name in listOf("adapter.json","jni_predictions.json","kotlin_features.json"))
+        for (name in listOf("adapter_pixel.json","jni_predictions.json","kotlin_features.json"))
             File(context.filesDir,"device_$name").writeBytes(File(root,name).readBytes())
     }
 
