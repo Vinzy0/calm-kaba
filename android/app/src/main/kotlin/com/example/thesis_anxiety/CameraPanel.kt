@@ -97,6 +97,8 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     }
     /** Requested MediaPipe delegate for the next start ("CPU" or "GPU"). */
     @Volatile var requestedDelegate = "CPU"
+    /** "GPU" for all tasks, or a comma list of tasks that should try GPU, e.g. "hands,pose". */
+    private fun wantsGpu(task: String) = requestedDelegate == "GPU" || requestedDelegate.split(',').contains(task)
     private val activeDelegate = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val fallback = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile private var modelsLabel = ""
@@ -141,10 +143,9 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
                     val bytes = activity.assets.open("tracking/$name").use { it.readBytes() }
                     require(ModelBank.sha256(bytes) == sources.getJSONObject(name).getString("sha256")) { "Tracking asset checksum failed: $name" }
                 }
-                val gpu = requestedDelegate == "GPU"
-                val f = on(faceThread) { face = createFace(gpu) }
-                val p = on(poseThread) { pose = createPose(gpu) }
-                val h = on(handThread) { hands = createHands(gpu) }
+                val f = on(faceThread) { face = createFace(wantsGpu("face")) }
+                val p = on(poseThread) { pose = createPose(wantsGpu("pose")) }
+                val h = on(handThread) { hands = createHands(wantsGpu("hands")) }
                 f.get(); p.get(); h.get()
                 window.reset(); lastMs = -1
                 main.post { if (!disposed && generation.get() == id) bindCamera(id) }

@@ -36,7 +36,8 @@ class MainActivity : FlutterActivity() {
                 "start" -> if (panel == null) result.error("camera_not_ready","Wait for the preview to open",null) else { panel!!.start(); result.success(null) }
                 "stop" -> { panel?.stop(); result.success(null) }
                 "models" -> { modelFolder = if (call.arguments == "v6") "behavior_v6" else "behavior"; panel?.modelFolder = modelFolder; result.success(null) }
-                "delegate" -> { trackingDelegate = if (call.arguments == "GPU") "GPU" else "CPU"; panel?.requestedDelegate = trackingDelegate; result.success(null) }
+                // "CPU", "GPU", or a comma list of tasks for GPU ("face,pose,hands").
+                "delegate" -> { trackingDelegate = (call.arguments as? String)?.ifBlank { "CPU" } ?: "CPU"; panel?.requestedDelegate = trackingDelegate; result.success(null) }
                 "fpsLock" -> { lockFps30 = call.arguments == true; panel?.lockFps30 = lockFps30; result.success(null) }
                 "diagnostics" -> { diagnostics = call.arguments == true; panel?.diagnosticsEnabled = diagnostics; result.success(null) }
                 else -> result.notImplemented()

@@ -420,7 +420,11 @@ class _HomePageState extends State<HomePage>
                             ? null
                             : (value) {
                                 setState(() => _gpuDelegate = value);
-                                unawaited(_detectionService.setDelegate(value));
+                                unawaited(
+                                  _detectionService.setGpuTasks(
+                                    value ? {'face', 'pose', 'hands'} : {},
+                                  ),
+                                );
                               },
                       ),
                     ],
