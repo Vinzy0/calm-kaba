@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:ui' show FramePhase, FrameTiming;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 
 /// Developer metrics. Only this widget rebuilds, once per native packet (1 Hz).
 ///
@@ -101,12 +103,42 @@ class _DiagnosticsPanelState extends State<DiagnosticsPanel> {
           'INPUT ${(d['input'] as Map?)?.entries.map((e) => '${e.key}=${e.value}').join(' ') ?? 'n/a'}',
           'DELEGATE ${(d['delegates'] as Map?)?.entries.where((e) => e.value != '').map((e) => '${e.key}=${e.value}').join(' ') ?? 'n/a'}',
           'EXPOSURE ${(d['exposure'] as Map?)?.entries.map((e) => '${e.key}=${e.value is num ? _n(e.value) : e.value}').join(' ') ?? 'n/a'}',
+          'CAMERA ${(d['camera'] as Map?)?.entries.map((e) => '${e.key}=${e.value}').join(' ') ?? 'n/a'}',
+          'PHONE ${(d['device'] as Map?)?.entries.map((e) => '${e.key}=${e.value is double ? _n(e.value, 2) : e.value}').join(' ') ?? 'n/a'}',
           'CLOCK ${d['clock']}  channel/s ${d['channelPackets']}',
         ];
+        final text = lines.join('\n');
         return Container(
           color: Colors.black87,
           padding: const EdgeInsets.all(8),
-          child: Text(lines.join('\n'), style: style),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(text, style: style),
+              TextButton.icon(
+                icon: const Icon(Icons.copy, color: Colors.white, size: 16),
+                label: const Text(
+                  'Copy all (paste to Claude)',
+                  style: TextStyle(color: Colors.white),
+                ),
+                onPressed: () async {
+                  final raw = {
+                    ...d,
+                    'previewFpsEstimate': flutterFps,
+                    'rasterP50Ms': rasterP50,
+                  };
+                  await Clipboard.setData(
+                    ClipboardData(text: '$text\n\nRAW ${jsonEncode(raw)}'),
+                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                      const SnackBar(content: Text('Diagnostics copied')),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
         );
       },
     );

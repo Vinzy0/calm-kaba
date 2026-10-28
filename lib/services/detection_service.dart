@@ -181,6 +181,15 @@ class DetectionService {
     }
   }
 
+  /// Keep the camera at 30 fps in dim light (darker, noisier frames).
+  Future<void> setFpsLock(bool enabled) async {
+    try {
+      await _methods.invokeMethod<void>('fpsLock', enabled);
+    } on MissingPluginException {
+      /* Non-Android widget tests have no camera. */
+    }
+  }
+
   Future<void> setDiagnostics(bool enabled) async {
     if (!enabled) diagnostics.value = null;
     try {

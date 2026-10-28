@@ -28,6 +28,7 @@ class _HomePageState extends State<HomePage>
   bool _developerMode = false;
   bool _leadModels = false;
   bool _gpuDelegate = false;
+  bool _fpsLock = true;
   int _selectedTabIndex = 0;
   String _status =
       'Keep your face, shoulders, and hands visible. Move back for knees.';
@@ -420,6 +421,28 @@ class _HomePageState extends State<HomePage>
                             : (value) {
                                 setState(() => _gpuDelegate = value);
                                 unawaited(_detectionService.setDelegate(value));
+                              },
+                      ),
+                    ],
+                  ),
+                if (_developerMode)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Lock camera at 30 fps (darker in dim light; next scan)',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Switch(
+                        value: _fpsLock,
+                        onChanged: _isDetecting
+                            ? null
+                            : (value) {
+                                setState(() => _fpsLock = value);
+                                unawaited(_detectionService.setFpsLock(value));
                               },
                       ),
                     ],

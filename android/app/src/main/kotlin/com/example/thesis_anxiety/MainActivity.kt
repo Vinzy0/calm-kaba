@@ -17,6 +17,7 @@ class MainActivity : FlutterActivity() {
     private var diagnostics = false
     private var modelFolder = "behavior"
     private var trackingDelegate = "CPU"
+    private var lockFps30 = true
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
@@ -27,7 +28,7 @@ class MainActivity : FlutterActivity() {
         flutterEngine.platformViewsController.registry.registerViewFactory("calm/camera",object : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
             override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
                 panel?.stop()
-                return CameraPanel(this@MainActivity) { sink?.success(it) }.also { panel = it; it.diagnosticsEnabled = diagnostics; it.modelFolder = modelFolder; it.requestedDelegate = trackingDelegate }
+                return CameraPanel(this@MainActivity) { sink?.success(it) }.also { panel = it; it.diagnosticsEnabled = diagnostics; it.modelFolder = modelFolder; it.requestedDelegate = trackingDelegate; it.lockFps30 = lockFps30 }
             }
         })
         MethodChannel(messenger,"calm/detection").setMethodCallHandler { call,result ->
@@ -36,6 +37,7 @@ class MainActivity : FlutterActivity() {
                 "stop" -> { panel?.stop(); result.success(null) }
                 "models" -> { modelFolder = if (call.arguments == "v6") "behavior_v6" else "behavior"; panel?.modelFolder = modelFolder; result.success(null) }
                 "delegate" -> { trackingDelegate = if (call.arguments == "GPU") "GPU" else "CPU"; panel?.requestedDelegate = trackingDelegate; result.success(null) }
+                "fpsLock" -> { lockFps30 = call.arguments == true; panel?.lockFps30 = lockFps30; result.success(null) }
                 "diagnostics" -> { diagnostics = call.arguments == true; panel?.diagnosticsEnabled = diagnostics; result.success(null) }
                 else -> result.notImplemented()
             }

@@ -63,13 +63,16 @@ class Diagnostics {
     @Volatile var input: Map<String, Any?> = emptyMap()
     @Volatile var delegates: Map<String, Any?> = emptyMap()
     @Volatile var exposure: Map<String, Any?> = emptyMap()
+    @Volatile var camera: Map<String, Any?> = emptyMap()
+    @Volatile var device: Map<String, Any?> = emptyMap()
+    @Volatile var brightness: Int? = null
 
     fun stage(name: String, ns: Long) { stages[name]?.add(ns) }
     fun tracking(values: Map<String, Boolean>, now: Long) { for ((k, r) in tracked) if (values[k] == true) r.tick(now) }
     fun reset() {
         listOf(captured, delivered, processed, skipped, predictions).forEach { it.clear() }
         stages.values.forEach { it.clear() }; tracked.values.forEach { it.clear() }
-        input = emptyMap(); delegates = emptyMap(); exposure = emptyMap(); realtimeClock = null
+        input = emptyMap(); delegates = emptyMap(); exposure = emptyMap(); camera = emptyMap(); brightness = null; realtimeClock = null
     }
     fun snapshot(): Map<String, Any?> {
         val now = System.nanoTime()
@@ -86,6 +89,7 @@ class Diagnostics {
             "stageLabels" to stageLabels,
             "trackingRate" to tracked.mapValues { if (processedCount == 0) null else it.value.count(now).toDouble()/processedCount },
             "clock" to when (realtimeClock) { true -> "REALTIME"; false -> "MONOTONIC (assumed)"; null -> "unknown" },
-            "input" to input, "delegates" to delegates, "exposure" to exposure)
+            "input" to input, "delegates" to delegates, "exposure" to exposure + ("brightness0to255" to brightness),
+            "camera" to camera, "device" to device)
     }
 }

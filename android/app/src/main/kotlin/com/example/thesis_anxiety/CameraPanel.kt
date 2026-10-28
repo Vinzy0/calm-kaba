@@ -9,8 +9,13 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.TotalCaptureResult
+import android.os.BatteryManager
+import android.os.Build
 import android.os.Handler
+import android.os.PowerManager
+import android.os.SystemClock
 import android.os.Looper
+import android.util.Range
 import android.util.Rational
 import android.util.Log
 import android.util.Size
@@ -72,6 +77,24 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     @Volatile private var running = false
     /** Model bundle for the next start: "behavior" (822, vs everything) or "behavior_v6" (lead, 1,122, vs control). */
     @Volatile var modelFolder = "behavior"
+    /** Keep the camera at 30 fps in dim light (shorter exposure: darker, noisier frames). */
+    @Volatile var lockFps30 = true
+    private var startedAt = 0L
+    private var frameCount = 0
+    /** Phone state that changes speed: battery, power saving, heat. Read once per diagnostics packet. */
+    private fun deviceInfo(): Map<String, Any?> {
+        val power = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
+        val battery = activity.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
+        val thermal = if (Build.VERSION.SDK_INT >= 29) listOf("none","light","moderate","severe","critical","emergency","shutdown")
+            .getOrNull(power.currentThermalStatus) else "n/a"
+        return mapOf("phone" to "${Build.MANUFACTURER} ${Build.MODEL}", "android" to Build.VERSION.RELEASE,
+            "chip" to if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else Build.HARDWARE,
+            "app" to activity.packageManager.getPackageInfo(activity.packageName,0).versionName,
+            "battery%" to battery.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY),
+            "charging" to battery.isCharging, "batterySaver" to power.isPowerSaveMode,
+            "heat" to thermal, "heatHeadroom" to if (Build.VERSION.SDK_INT >= 30) power.getThermalHeadroom(10).takeIf { it.isFinite() } else null,
+            "scanSeconds" to if (startedAt > 0) (SystemClock.elapsedRealtime()-startedAt)/1000 else 0)
+    }
     /** Requested MediaPipe delegate for the next start ("CPU" or "GPU"). */
     @Volatile var requestedDelegate = "CPU"
     private val activeDelegate = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -87,6 +110,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     private fun scheduleDiagnostics(id: Int) {
         main.postDelayed({
             if (disposed || !running || !diagnosticsEnabled || generation.get() != id) return@postDelayed
+            diag.device = deviceInfo()
             val packet = diag.snapshot()
             Log.i("CalmDiag", JSONObject(packet).toString())
             emit(packet)
@@ -103,7 +127,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         }
         running = true
         val id = generation.incrementAndGet()
-        diag.reset()
+        diag.reset(); startedAt = SystemClock.elapsedRealtime(); frameCount = 0
         activeDelegate.clear(); fallback.clear(); publishDelegates()
         if (diagnosticsEnabled) scheduleDiagnostics(id)
         event(id,mapOf("type" to "status", "message" to "Starting camera and landmark tracking"))
@@ -177,6 +201,13 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
                 val rotation = preview.display?.rotation ?: 0
                 val resolution = ResolutionSelector.Builder().setResolutionStrategy(ResolutionStrategy(Size(640,480),ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build()
                 val previewBuilder = Preview.Builder().setTargetRotation(rotation).setResolutionSelector(resolution)
+                // Camera frame rate: the phone may stretch exposure in dim light (e.g. [10, 30] -> 17 fps).
+                val ranges = selector.filter(camera.availableCameraInfos).firstOrNull()?.let {
+                    Camera2CameraInfo.from(it).getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                }?.toList() ?: emptyList()
+                val locked: Range<Int>? = if (lockFps30) ranges.filter { it.upper == 30 }.maxByOrNull { it.lower } else null
+                diag.camera = mapOf("fpsLockRequested" to lockFps30, "fpsRangeSet" to (locked?.toString() ?: "camera default"),
+                    "fpsRangesAvailable" to ranges.joinToString(" "))
                 // The session callback sees every repeating capture (preview + analysis surfaces).
                 Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
                     private var n = 0
@@ -185,14 +216,18 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
                         if (n++ % 30 == 0) diag.exposure = mapOf(
                             "aeFpsRange" to result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)?.toString(),
                             "exposureMs" to result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { it/1e6 },
+                            "iso" to result.get(CaptureResult.SENSOR_SENSITIVITY),
                             "frameDurationMs" to result.get(CaptureResult.SENSOR_FRAME_DURATION)?.let { it/1e6 })
                     }
                 })
+                if (locked != null) Camera2Interop.Extender(previewBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, locked)
                 val usePreview = previewBuilder.build()
                 usePreview.setSurfaceProvider(preview.surfaceProvider)
-                val useAnalysis = ImageAnalysis.Builder().setTargetRotation(rotation).setResolutionSelector(resolution)
+                val analysisBuilder = ImageAnalysis.Builder().setTargetRotation(rotation).setResolutionSelector(resolution)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                if (locked != null) Camera2Interop.Extender(analysisBuilder).setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, locked)
+                val useAnalysis = analysisBuilder.build()
                 analysis = useAnalysis
                 useAnalysis.setAnalyzer(worker) { image ->
                     diag.delivered.tick()
@@ -213,6 +248,15 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
             } catch (e: Throwable) { fail(id,e) }
         },ContextCompat.getMainExecutor(activity))
     }
+    /** Average luma (0-255) from a 32x24 sample grid; dark frames track worse. */
+    private fun meanBrightness(b: Bitmap): Int {
+        var sum = 0L
+        for (j in 0 until 32) for (i in 0 until 24) {
+            val c = b.getPixel(i*b.width/24, j*b.height/32)
+            sum += (299*Color.red(c)+587*Color.green(c)+114*Color.blue(c))/1000
+        }
+        return (sum/(32*24)).toInt()
+    }
     private fun points(raw: List<NormalizedLandmark>): List<Point3> = raw.map {
         Point3(it.x().toDouble(),it.y().toDouble(),it.z().toDouble(),it.visibility().orElse(1f).toDouble(),it.presence().orElse(1f).toDouble())
     }
@@ -229,6 +273,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
             Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) },true)
         val mpImage = BitmapImageBuilder(rotated).build()
         var mark = System.nanoTime(); diag.stage("cropRotate",mark-converted)
+        if (frameCount++ % 15 == 0) diag.brightness = meanBrightness(rotated)
         fun lap(name: String) { val now = System.nanoTime(); diag.stage(name,now-mark); mark = now }
         if (diag.input.isEmpty()) diag.input = mapOf("analysis" to "${image.width}x${image.height}",
             "crop" to "${crop.width()}x${crop.height()}", "modelInput" to "${rotated.width}x${rotated.height}",
