@@ -52,11 +52,11 @@ class Diagnostics {
     val predictions = Rate(12_000_000_000L)
     val stages = linkedMapOf(
         "captureToAnalyzer" to Series(), "convert" to Series(), "cropRotate" to Series(),
-        "face" to Series(), "pose" to Series(), "hands" to Series(), "adaptWindow" to Series(),
+        "face" to Series(), "pose" to Series(), "hands" to Series(), "tracking" to Series(), "adaptWindow" to Series(),
         "features" to Series(), "classifiers" to Series(), "total" to Series(),
         "captureToResult" to Series(), "overlayAge" to Series(), "windowAge" to Series())
     val stageLabels = mapOf("captureToAnalyzer" to "capture → analyzer", "convert" to "YUV/RGBA → bitmap",
-        "cropRotate" to "crop + rotate", "adaptWindow" to "adapt + window", "features" to "window features",
+        "cropRotate" to "crop + rotate", "tracking" to "trackers (wall)", "adaptWindow" to "adapt + window", "features" to "window features",
         "classifiers" to "7 classifiers", "total" to "analyzer total", "captureToResult" to "capture → result",
         "overlayAge" to "overlay age at draw", "windowAge" to "window end → prediction")
     private val tracked = linkedMapOf("face" to Rate(), "body" to Rate(), "left_hand" to Rate(), "right_hand" to Rate(), "knees" to Rate())

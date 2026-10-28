@@ -1,14 +1,10 @@
-
 import 'package:flutter/material.dart';
 import 'theme/design_system.dart';
 
 class DisclaimerPage extends StatelessWidget {
   const DisclaimerPage({super.key});
 
-  Widget _buildDisclaimerSection(
-      String title,
-      String description,
-      ) {
+  Widget _buildDisclaimerSection(String title, String description) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 28),
       child: Column(
@@ -16,9 +12,7 @@ class DisclaimerPage extends StatelessWidget {
         children: [
           Text(
             title,
-            style: AppTypography.titleSmall.copyWith(
-              color: AppColors.primary,
-            ),
+            style: AppTypography.titleSmall.copyWith(color: AppColors.primary),
           ),
           const SizedBox(height: 8),
           Text(
@@ -56,8 +50,7 @@ class DisclaimerPage extends StatelessWidget {
                           Icons.arrow_back_ios_new,
                           color: AppColors.primary,
                         ),
-                        onPressed: () =>
-                            Navigator.of(context).pop(),
+                        onPressed: () => Navigator.of(context).pop(),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                         tooltip: 'Back',
@@ -79,7 +72,7 @@ class DisclaimerPage extends StatelessWidget {
 
               Text(
                 'Please read the following information carefully '
-                    'before using the screening tools.',
+                'before using the screening tools.',
                 style: AppTypography.bodySmall.copyWith(
                   color: AppColors.textSecondary,
                   height: 1.5,
@@ -198,16 +191,13 @@ class DisclaimerPage extends StatelessWidget {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(),
+                  onPressed: () => Navigator.of(context).pop(),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30),
                     ),
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 16,
-                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: Text(
                     'I Understand',

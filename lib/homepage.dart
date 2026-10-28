@@ -6,6 +6,7 @@ import 'services/log_service.dart';
 import 'services/navigation_observer.dart';
 import 'components/camera_preview.dart';
 import 'components/diagnostics_panel.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class HomePage extends StatefulWidget {
   final bool active;
@@ -26,6 +27,7 @@ class _HomePageState extends State<HomePage>
   bool _cameraReady = false;
   bool _developerMode = false;
   bool _leadModels = false;
+  bool _gpuDelegate = false;
   int _selectedTabIndex = 0;
   String _status =
       'Keep your face, shoulders, and hands visible. Move back for knees.';
@@ -256,15 +258,29 @@ class _HomePageState extends State<HomePage>
                   },
                 ),
                 if (!_isDetecting)
-                  const ColoredBox(
+                  ColoredBox(
                     color: Colors.black,
                     child: Center(
                       child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Text(
-                          'Tap Scan Now to open the camera',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white),
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 140,
+                              height: 140,
+                              child: SvgPicture.asset(
+                                'assets/images/finalFish.svg',
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Tap Scan Now to open the camera',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -382,6 +398,28 @@ class _HomePageState extends State<HomePage>
                                     value ? 'v6' : 'v4',
                                   ),
                                 );
+                              },
+                      ),
+                    ],
+                  ),
+                if (_developerMode)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'GPU delegate (experimental, applies on next scan)',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Switch(
+                        value: _gpuDelegate,
+                        onChanged: _isDetecting
+                            ? null
+                            : (value) {
+                                setState(() => _gpuDelegate = value);
+                                unawaited(_detectionService.setDelegate(value));
                               },
                       ),
                     ],
@@ -677,9 +715,15 @@ class _HomePageState extends State<HomePage>
                           cardWidth,
                         ),
                         _buildCopingCard(
-                          'Breathing Regulation',
-                          'Coaches you through inhales and exhales to assist with labored breaths.',
+                          '4-7-8 Breathing',
+                          'Longer exhales to drop your spiked heart rate. Do NOT use when hyperventilating.',
                           '/breathingRegulation',
+                          cardWidth,
+                        ),
+                        _buildCopingCard(
+                          'Box Breathing',
+                          'Guides you through an even breathing practice.',
+                          '/boxBreathing',
                           cardWidth,
                         ),
                         _buildCopingCard(

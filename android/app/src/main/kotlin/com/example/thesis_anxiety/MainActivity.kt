@@ -16,6 +16,7 @@ class MainActivity : FlutterActivity() {
     private var sink: EventChannel.EventSink? = null
     private var diagnostics = false
     private var modelFolder = "behavior"
+    private var trackingDelegate = "CPU"
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
@@ -26,7 +27,7 @@ class MainActivity : FlutterActivity() {
         flutterEngine.platformViewsController.registry.registerViewFactory("calm/camera",object : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
             override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
                 panel?.stop()
-                return CameraPanel(this@MainActivity) { sink?.success(it) }.also { panel = it; it.diagnosticsEnabled = diagnostics; it.modelFolder = modelFolder }
+                return CameraPanel(this@MainActivity) { sink?.success(it) }.also { panel = it; it.diagnosticsEnabled = diagnostics; it.modelFolder = modelFolder; it.requestedDelegate = trackingDelegate }
             }
         })
         MethodChannel(messenger,"calm/detection").setMethodCallHandler { call,result ->
@@ -34,6 +35,7 @@ class MainActivity : FlutterActivity() {
                 "start" -> if (panel == null) result.error("camera_not_ready","Wait for the preview to open",null) else { panel!!.start(); result.success(null) }
                 "stop" -> { panel?.stop(); result.success(null) }
                 "models" -> { modelFolder = if (call.arguments == "v6") "behavior_v6" else "behavior"; panel?.modelFolder = modelFolder; result.success(null) }
+                "delegate" -> { trackingDelegate = if (call.arguments == "GPU") "GPU" else "CPU"; panel?.requestedDelegate = trackingDelegate; result.success(null) }
                 "diagnostics" -> { diagnostics = call.arguments == true; panel?.diagnosticsEnabled = diagnostics; result.success(null) }
                 else -> result.notImplemented()
             }

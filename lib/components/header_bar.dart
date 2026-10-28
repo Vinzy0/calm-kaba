@@ -21,14 +21,14 @@ class HeaderBar extends StatelessWidget implements PreferredSizeWidget {
       centerTitle: true,
       leading: showBackButton
           ? IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.textPrimary),
+              icon: const Icon(
+                Icons.arrow_back_ios_new,
+                color: AppColors.textPrimary,
+              ),
               onPressed: () => Navigator.of(context).pop(),
             )
           : null,
-      title: Text(
-        title,
-        style: AppTypography.titleLarge,
-      ),
+      title: Text(title, style: AppTypography.titleLarge),
       actions: actions,
     );
   }

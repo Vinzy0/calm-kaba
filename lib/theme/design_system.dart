@@ -5,7 +5,7 @@ class AppColors {
   static const Color primary = Color(0xFFDF3A81);
   static const Color secondary = Color(0xFF63C132);
   static const Color tertiary = Color(0xFFEA6AA4);
-  
+
   static const Color willowGreen = Color(0xFF96D289);
   static const Color lightGreen = Color(0xFFA9E99B);
   static const Color celadon = Color(0xFFBBEFA9);
@@ -18,7 +18,7 @@ class AppColors {
   static const Color hotPinkWeb = Color(0xFFFF70BF);
   static const Color elizabeth = Color(0xFF80ED99);
   static const Color arden = Color(0xFF04A777);
-  
+
   static const Color textPrimary = Color(0xFF000000);
   static const Color textSecondary = Color(0xFF555555);
 }
@@ -49,43 +49,111 @@ class AppColorsExtension extends ThemeExtension<AppColorsExtension> {
 
   @override
   ThemeExtension<AppColorsExtension> lerp(
-      covariant ThemeExtension<AppColorsExtension>? other, double t) {
+    covariant ThemeExtension<AppColorsExtension>? other,
+    double t,
+  ) {
     if (other is! AppColorsExtension) {
       return this;
     }
     return AppColorsExtension(
       alternate: Color.lerp(alternate, other.alternate, t)!,
       cardBackground: Color.lerp(cardBackground, other.cardBackground, t)!,
-      secondaryBackground: Color.lerp(secondaryBackground, other.secondaryBackground, t)!,
+      secondaryBackground: Color.lerp(
+        secondaryBackground,
+        other.secondaryBackground,
+        t,
+      )!,
     );
   }
 }
 
 class AppTypography {
-  static TextStyle displayLarge = GoogleFonts.poppins(fontSize: 64, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  static TextStyle displayMedium = GoogleFonts.poppins(fontSize: 44, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  static TextStyle displaySmall = GoogleFonts.poppins(fontSize: 36, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  
-  static TextStyle headlineLarge = GoogleFonts.poppins(fontSize: 32, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  static TextStyle headlineMedium = GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  static TextStyle headlineSmall = GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  
-  static TextStyle titleLarge = GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  static TextStyle titleMedium = GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  static TextStyle titleSmall = GoogleFonts.openSans(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-  
-  static TextStyle labelLarge = GoogleFonts.openSans(fontSize: 16, fontWeight: FontWeight.normal, color: AppColors.textSecondary);
-  static TextStyle labelMedium = GoogleFonts.openSans(fontSize: 14, fontWeight: FontWeight.normal, color: AppColors.textSecondary);
-  static TextStyle labelSmall = GoogleFonts.openSans(fontSize: 12, fontWeight: FontWeight.normal, color: AppColors.textSecondary);
-  
-  static TextStyle bodyLarge = GoogleFonts.openSans(fontSize: 16, fontWeight: FontWeight.normal, color: AppColors.textPrimary);
-  static TextStyle bodyMedium = GoogleFonts.openSans(fontSize: 14, fontWeight: FontWeight.normal, color: AppColors.textPrimary);
-  static TextStyle bodySmall = GoogleFonts.openSans(fontSize: 12, fontWeight: FontWeight.normal, color: AppColors.textPrimary);
+  static TextStyle displayLarge = GoogleFonts.poppins(
+    fontSize: 64,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+  static TextStyle displayMedium = GoogleFonts.poppins(
+    fontSize: 44,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+  static TextStyle displaySmall = GoogleFonts.poppins(
+    fontSize: 36,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+
+  static TextStyle headlineLarge = GoogleFonts.poppins(
+    fontSize: 32,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+  static TextStyle headlineMedium = GoogleFonts.poppins(
+    fontSize: 28,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+  static TextStyle headlineSmall = GoogleFonts.poppins(
+    fontSize: 24,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+
+  static TextStyle titleLarge = GoogleFonts.poppins(
+    fontSize: 20,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+  static TextStyle titleMedium = GoogleFonts.poppins(
+    fontSize: 18,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+  static TextStyle titleSmall = GoogleFonts.openSans(
+    fontSize: 16,
+    fontWeight: FontWeight.w600,
+    color: AppColors.textPrimary,
+  );
+
+  static TextStyle labelLarge = GoogleFonts.openSans(
+    fontSize: 16,
+    fontWeight: FontWeight.normal,
+    color: AppColors.textSecondary,
+  );
+  static TextStyle labelMedium = GoogleFonts.openSans(
+    fontSize: 14,
+    fontWeight: FontWeight.normal,
+    color: AppColors.textSecondary,
+  );
+  static TextStyle labelSmall = GoogleFonts.openSans(
+    fontSize: 12,
+    fontWeight: FontWeight.normal,
+    color: AppColors.textSecondary,
+  );
+
+  static TextStyle bodyLarge = GoogleFonts.openSans(
+    fontSize: 16,
+    fontWeight: FontWeight.normal,
+    color: AppColors.textPrimary,
+  );
+  static TextStyle bodyMedium = GoogleFonts.openSans(
+    fontSize: 14,
+    fontWeight: FontWeight.normal,
+    color: AppColors.textPrimary,
+  );
+  static TextStyle bodySmall = GoogleFonts.openSans(
+    fontSize: 12,
+    fontWeight: FontWeight.normal,
+    color: AppColors.textPrimary,
+  );
 }
 
 class AppTheme {
   // We manage the current ThemeMode globally here
-  static final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.dark);
+  static final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(
+    ThemeMode.dark,
+  );
 
   static TextTheme _buildTextTheme() {
     return TextTheme(
@@ -112,7 +180,9 @@ class AppTheme {
     return ThemeData(
       brightness: Brightness.dark,
       primaryColor: AppColors.primary,
-      scaffoldBackgroundColor: const Color(0xFFC5FF7A), // alternate in dark mode
+      scaffoldBackgroundColor: const Color(
+        0xFFC5FF7A,
+      ), // alternate in dark mode
       colorScheme: const ColorScheme.dark(
         primary: AppColors.primary,
         secondary: AppColors.secondary,
@@ -135,7 +205,9 @@ class AppTheme {
     return ThemeData(
       brightness: Brightness.light,
       primaryColor: AppColors.primary,
-      scaffoldBackgroundColor: const Color(0xFFFFFFFF), // alternate in light mode
+      scaffoldBackgroundColor: const Color(
+        0xFFFFFFFF,
+      ), // alternate in light mode
       colorScheme: const ColorScheme.light(
         primary: AppColors.primary,
         secondary: AppColors.secondary,

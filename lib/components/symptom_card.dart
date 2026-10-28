@@ -21,7 +21,9 @@ class SymptomCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Theme.of(context).extension<AppColorsExtension>()!.secondaryBackground,
+          color: Theme.of(
+            context,
+          ).extension<AppColorsExtension>()!.secondaryBackground,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
@@ -34,15 +36,9 @@ class SymptomCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: AppTypography.titleLarge,
-            ),
+            Text(title, style: AppTypography.titleLarge),
             const SizedBox(height: 8),
-            Text(
-              description,
-              style: AppTypography.bodyMedium,
-            ),
+            Text(description, style: AppTypography.bodyMedium),
           ],
         ),
       ),
