@@ -47,7 +47,9 @@ class Diagnostics {
         return if (age in 0..10_000_000_000L) age else null
     }
 
-    val captured = Rate(); val delivered = Rate(); val processed = Rate(); val skipped = Rate(); val predictions = Rate()
+    val captured = Rate(); val delivered = Rate(); val processed = Rate(); val skipped = Rate()
+    /** Predictions arrive every 2 s, so their rate needs a longer window. */
+    val predictions = Rate(12_000_000_000L)
     val stages = linkedMapOf(
         "captureToAnalyzer" to Series(), "convert" to Series(), "cropRotate" to Series(),
         "face" to Series(), "pose" to Series(), "hands" to Series(), "adaptWindow" to Series(),
@@ -79,6 +81,7 @@ class Diagnostics {
             "skippedPerSecond" to skipped.count(now)/2.0,
             "droppedFpsEstimate" to if (cap != null && del != null) (cap-del).coerceAtLeast(0.0) else null,
             "predictionHz" to predictions.perSecond(now),
+            // Emulator cameras can stamp frames slightly after "now"; such ages are skipped.
             "stages" to stages.mapValues { it.value.summary() },
             "stageLabels" to stageLabels,
             "trackingRate" to tracked.mapValues { if (processedCount == 0) null else it.value.count(now).toDouble()/processedCount },
