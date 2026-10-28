@@ -62,11 +62,17 @@ class DevicePipelineTest {
             assertEquals(16,f.facialTransformationMatrixes().get().first().size)
             val observed = LandmarkAdapter.adapt(0.0,points(f.faceLandmarks().first()),p.landmarks().firstOrNull()?.let { points(it) } ?: emptyList(),
                 h.landmarks().map { points(it) },f.faceBlendshapes().get().first().associate { it.categoryName().trimStart('_') to it.score().toDouble() },
-                LandmarkAdapter.rowMajorMatrix(f.facialTransformationMatrixes().get().first()),bank.engine.bs,bank.engine.fm)
+                LandmarkAdapter.rowMajorMatrix(f.facialTransformationMatrixes().get().first()),bank.engine.bs,bank.engine.fm,
+                bitmap.width,bitmap.height)
             var faceError = 0.0; var blendError = 0.0; var matrixError = 0.0
             val reference = expected.getJSONObject("row")
+            // Landmark coordinates follow the dataset exporter (pixel space); other values the adapter row.
+            val pixel = expected.getJSONObject("pixel_row")
             for (key in reference.keys()) {
                 if (reference.isNull(key)) continue
+                if (key.startsWith("face_") && !key.startsWith("face_matrix") && observed.row.containsKey(key)) {
+                    faceError = maxOf(faceError,abs(observed.row[key]!!-pixel.getDouble(key))); continue
+                }
                 val actual = observed.row[key] ?: Double.NaN
                 if (key.startsWith("face_matrix")) matrixError = maxOf(matrixError,abs(actual-reference.getDouble(key)))
                 else if (key.startsWith("face_")) faceError = maxOf(faceError,abs(actual-reference.getDouble(key)))

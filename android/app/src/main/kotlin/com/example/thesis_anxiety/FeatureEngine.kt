@@ -6,7 +6,15 @@ data class Observation(val time: Double, val row: Map<String, Double>, val track
 data class Point3(val x: Double, val y: Double, val z: Double = 0.0,
                   val visibility: Double = 1.0, val presence: Double = 1.0)
 
-/** Same image-XY conventions as webcam_core.adapt_landmarks. Inference is never mirrored. */
+/**
+ * Reproduces the dataset exporter (allextractor.py): landmarks are converted to pixels
+ * (x*width, y*height) before translation, rotation and scaling, so the result does not
+ * depend on the frame's aspect ratio. Inference is never mirrored.
+ *
+ * Face: origin = midpoint(133,362), x axis along 133->362, scale = max(|33-263| px, 1).
+ * Body and hands: origin = hip midpoint, x axis along shoulders 11->12,
+ * scale = max(shoulder width, 0.25 * shoulder-midpoint-to-hip distance, 1 px).
+ */
 object LandmarkAdapter {
     fun rowMajorMatrix(packed: FloatArray): DoubleArray {
         require(packed.size == 16)
@@ -16,27 +24,38 @@ object LandmarkAdapter {
     val pose = listOf(0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28)
     val face = listOf(1, 13, 14, 33, 61, 105, 133, 145, 159, 263, 291, 334, 362, 374, 386, 468, 473)
     val trackKeys = listOf("face", "body", "left_hand", "right_hand", "knees", "reference")
-    fun local(points: List<Point3>, a: Point3, b: Point3, origin: Point3, scale: Double): List<Point3> {
-        val dx = b.x-a.x; val dy = b.y-a.y; val norm = hypot(dx, dy)
-        if (!scale.isFinite() || scale < 1e-6 || norm < 1e-6) return points.map { Point3(Double.NaN, Double.NaN) }
-        return points.map {
-            val x = it.x-origin.x; val y = it.y-origin.y
-            Point3(((x*dx/norm+y*dy/norm)/scale).toFloat().toDouble(),
-                   ((-x*dy/norm+y*dx/norm)/scale).toFloat().toDouble())
+    /** Similarity transform in pixel space; float32 storage as in the training tables. */
+    class Frame(val ox: Double, val oy: Double, angle: Double, val scale: Double, val width: Double, val height: Double) {
+        private val c = cos(angle); private val s = sin(angle)
+        fun apply(p: Point3): Point3 {
+            val dx = p.x*width-ox; val dy = p.y*height-oy
+            return Point3(((c*dx+s*dy)/scale).toFloat().toDouble(), ((-s*dx+c*dy)/scale).toFloat().toDouble())
         }
     }
+    fun faceFrame(p: List<Point3>, w: Double, h: Double): Frame {
+        val ax = p[133].x*w; val ay = p[133].y*h; val bx = p[362].x*w; val by = p[362].y*h
+        val scale = maxOf(hypot((p[263].x-p[33].x)*w, (p[263].y-p[33].y)*h), 1.0)
+        return Frame((ax+bx)/2, (ay+by)/2, atan2(by-ay, bx-ax), scale, w, h)
+    }
+    fun bodyFrame(p: List<Point3>, w: Double, h: Double): Frame {
+        val ox = (p[23].x+p[24].x)/2*w; val oy = (p[23].y+p[24].y)/2*h
+        val lx = p[11].x*w; val ly = p[11].y*h; val rx = p[12].x*w; val ry = p[12].y*h
+        val shoulder = hypot(rx-lx, ry-ly); val torso = hypot((lx+rx)/2-ox, (ly+ry)/2-oy)
+        return Frame(ox, oy, atan2(ry-ly, rx-lx), maxOf(shoulder, torso*.25, 1.0), w, h)
+    }
     fun adapt(time: Double, facePoints: List<Point3>, body: List<Point3>, handPoints: List<List<Point3>>,
-              blendshapes: Map<String, Double>, matrix: DoubleArray?, bs: List<String>, fm: List<String>): Observation {
+              blendshapes: Map<String, Double>, matrix: DoubleArray?, bs: List<String>, fm: List<String>,
+              width: Int, height: Int): Observation {
         val row = mutableMapOf<String, Double>()
         val tracking = trackKeys.associateWith { false }.toMutableMap()
+        val w = width.toDouble(); val h = height.toDouble()
         fun store(prefix: String, points: List<Point3>, indices: List<Int>) {
             for (i in indices) { row["${prefix}_${i}_x"] = points[i].x; row["${prefix}_${i}_y"] = points[i].y }
         }
-        fun mid(a: Point3, b: Point3) = Point3((a.x+b.x)/2, (a.y+b.y)/2, (a.z+b.z)/2)
         fun visible(p: Point3) = p.x in 0.0..1.0 && p.y in 0.0..1.0 && p.visibility >= .5 && p.presence >= .5
         if (facePoints.size >= 478) {
-            val p = facePoints
-            val normalized = local(p, p[133], p[362], mid(p[133], p[362]), hypot(p[33].x-p[263].x, p[33].y-p[263].y))
+            val frame = faceFrame(facePoints, w, h)
+            val normalized = facePoints.map(frame::apply)
             store("face", normalized, face)
             tracking["face"] = face.all { normalized[it].x.isFinite() && normalized[it].y.isFinite() }
             for (name in bs) row[name] = blendshapes[name.removePrefix("bs_")] ?: Double.NaN
@@ -46,22 +65,23 @@ object LandmarkAdapter {
             }
         }
         if (body.size >= 33) {
-            val origin = mid(body[23], body[24]); val a = body[11]; val b = body[12]
-            val scale = hypot(b.x-a.x, b.y-a.y)
-            val normalized = local(body, a, b, origin, scale)
+            val frame = bodyFrame(body, w, h)
+            val normalized = body.map(frame::apply)
             store("pose", normalized, pose)
+            // The exporter's body_reference_available: the transform always exists with a pose.
             val reference = pose.all { normalized[it].x.isFinite() && normalized[it].y.isFinite() }
             tracking["reference"] = reference
-            tracking["body"] = reference && visible(a) && visible(b)
+            tracking["body"] = reference && visible(body[11]) && visible(body[12])
             tracking["knees"] = reference && visible(body[25]) && visible(body[26])
             val hh = handPoints.take(2).filter { it.size >= 21 }
             if (reference && hh.isNotEmpty()) {
-                fun cost(hand: Int, slot: Int) = hypot(hh[hand][0].x-body[15+slot].x, hh[hand][0].y-body[15+slot].y)
+                // Anatomical pose wrists, measured in pixels (matches the dataset in 97% of frames).
+                fun cost(hand: Int, slot: Int) = hypot((hh[hand][0].x-body[15+slot].x)*w, (hh[hand][0].y-body[15+slot].y)*h)
                 val first = if (hh.size == 1) { if (cost(0,0) <= cost(0,1)) 0 else 1 }
                             else if (cost(0,0)+cost(1,1) <= cost(0,1)+cost(1,0)) 0 else 1
                 for (i in hh.indices) {
                     val side = if ((first+i)%2 == 0) "left_hand" else "right_hand"
-                    store(side, local(hh[i], a, b, origin, scale), hands)
+                    store(side, hh[i].map(frame::apply), hands)
                     tracking[side] = true
                 }
             }

@@ -203,7 +203,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
             val packed = f.facialTransformationMatrixes().orElse(emptyList()).firstOrNull()
             val matrix = packed?.let { LandmarkAdapter.rowMajorMatrix(it) }
             val engine = bank!!.engine
-            val observation = LandmarkAdapter.adapt(ms/1000.0,fp,pp,hh,blend,matrix,engine.bs,engine.fm)
+            val observation = LandmarkAdapter.adapt(ms/1000.0,fp,pp,hh,blend,matrix,engine.bs,engine.fm,rotated.width,rotated.height)
             val snapshot = window.push(observation)
             lap("adaptWindow")
             val faceDraw = LandmarkAdapter.face.filter { it < fp.size }.map { fp[it] }
