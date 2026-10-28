@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'theme/design_system.dart';
 import 'services/log_service.dart';
 
@@ -60,19 +61,17 @@ class _DetectionLogPageState extends State<DetectionLogPage> {
         padding: const EdgeInsets.all(20.0),
         child: Row(
           children: [
-            // Image Placeholder (Pufferfish in mockup)
+            // Pufferfish SVG
             Container(
-              width: 100,
-              height: 100,
-              decoration: const BoxDecoration(
-                color: Colors.black12,
-                shape: BoxShape.circle,
-              ),
-              child: const Center(
-                child: Icon(Icons.image, size: 40, color: Colors.white54),
+              alignment: Alignment.center,
+              width: 120, // Increased size to fill space better
+              height: 120,
+              child: SvgPicture.asset(
+                'assets/images/pufferfishFinal.svg',
+                fit: BoxFit.contain,
               ),
             ),
-            const SizedBox(width: 20),
+            const SizedBox(width: 12), // Reduced gap to push text towards center slightly
             // Text & Button Column
             Expanded(
               child: Column(

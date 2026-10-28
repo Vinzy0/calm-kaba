@@ -87,8 +87,8 @@ class CopingTechniquesPage extends StatelessWidget {
                   Expanded(
                     child: _buildTechniqueCard(
                       context,
-                      'Breathing Regulation',
-                      'Coaches you through inhales and exhales to assist with labored breaths.',
+                      '4-7-8 Breathing',
+                      'Longer exhales to drop your spiked heart rate. Do NOT use when hyperventilating.',
                       '/breathingRegulation',
                     ),
                   ),
@@ -106,7 +106,14 @@ class CopingTechniquesPage extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  const Expanded(child: SizedBox()), // Empty space to align the 3rd card to the left
+                  Expanded(
+                    child: _buildTechniqueCard(
+                      context,
+                      'Box Breathing',
+                      'Guides you through an even breathing practice.',
+                      '/boxBreathing',
+                    ),
+                  ),
                 ],
               ),
             ],
