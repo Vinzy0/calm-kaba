@@ -35,10 +35,15 @@ import com.google.mediapipe.tasks.vision.handlandmarker.HandLandmarker
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import io.flutter.plugin.platform.PlatformView
 import org.json.JSONObject
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
-/** CameraX owns a latest-frame buffer. One worker owns all task/model/window state. */
+/**
+ * CameraX owns a latest-frame buffer. One worker owns model/window state; the three
+ * tracking tasks run concurrently, each created, used and closed on its own thread.
+ */
 class CameraPanel(private val activity: MainActivity, private val emit: (Map<String, Any?>) -> Unit) : PlatformView {
     private val root = FrameLayout(activity)
     private val preview = PreviewView(activity).apply {
@@ -53,9 +58,13 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     private var provider: ProcessCameraProvider? = null
     private var analysis: ImageAnalysis? = null
     private var bank: ModelBank? = null
-    private var face: FaceLandmarker? = null
-    private var pose: PoseLandmarker? = null
-    private var hands: HandLandmarker? = null
+    private val faceThread = Executors.newSingleThreadExecutor()
+    private val poseThread = Executors.newSingleThreadExecutor()
+    private val handThread = Executors.newSingleThreadExecutor()
+    private fun <T> on(thread: ExecutorService, block: () -> T) = thread.submit(Callable(block))
+    @Volatile private var face: FaceLandmarker? = null
+    @Volatile private var pose: PoseLandmarker? = null
+    @Volatile private var hands: HandLandmarker? = null
     private val window = LiveWindow()
     private var lastMs = -1L
     @Volatile private var disposed = false
@@ -95,13 +104,14 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
                     require(ModelBank.sha256(bytes) == sources.getJSONObject(name).getString("sha256")) { "Tracking asset checksum failed: $name" }
                 }
                 fun base(name: String) = BaseOptions.builder().setModelAssetPath("tracking/$name").build()
-                face = FaceLandmarker.createFromOptions(activity,FaceLandmarker.FaceLandmarkerOptions.builder()
+                val f = on(faceThread) { FaceLandmarker.createFromOptions(activity,FaceLandmarker.FaceLandmarkerOptions.builder()
                     .setBaseOptions(base("face_landmarker.task")).setRunningMode(RunningMode.VIDEO).setNumFaces(1)
-                    .setOutputFaceBlendshapes(true).setOutputFacialTransformationMatrixes(true).build())
-                pose = PoseLandmarker.createFromOptions(activity,PoseLandmarker.PoseLandmarkerOptions.builder()
-                    .setBaseOptions(base("pose_landmarker_lite.task")).setRunningMode(RunningMode.VIDEO).setNumPoses(1).build())
-                hands = HandLandmarker.createFromOptions(activity,HandLandmarker.HandLandmarkerOptions.builder()
-                    .setBaseOptions(base("hand_landmarker.task")).setRunningMode(RunningMode.VIDEO).setNumHands(2).build())
+                    .setOutputFaceBlendshapes(true).setOutputFacialTransformationMatrixes(true).build()).also { face = it } }
+                val p = on(poseThread) { PoseLandmarker.createFromOptions(activity,PoseLandmarker.PoseLandmarkerOptions.builder()
+                    .setBaseOptions(base("pose_landmarker_lite.task")).setRunningMode(RunningMode.VIDEO).setNumPoses(1).build()).also { pose = it } }
+                val h = on(handThread) { HandLandmarker.createFromOptions(activity,HandLandmarker.HandLandmarkerOptions.builder()
+                    .setBaseOptions(base("hand_landmarker.task")).setRunningMode(RunningMode.VIDEO).setNumHands(2).build()).also { hands = it } }
+                f.get(); p.get(); h.get()
                 window.reset(); lastMs = -1
                 main.post { if (!disposed && generation.get() == id) bindCamera(id) }
             } catch (e: Throwable) { fail(id,e) }
@@ -191,9 +201,12 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
             val ms = maxOf(lastMs+1,image.imageInfo.timestamp/1_000_000)
             val interrupted = lastMs >= 0 && ms-lastMs > 500
             lastMs = ms
-            val f = face!!.detectForVideo(mpImage,ms); lap("face")
-            val p = pose!!.detectForVideo(mpImage,ms); lap("pose")
-            val h = hands!!.detectForVideo(mpImage,ms); lap("hands")
+            // The tasks only read the shared input image.
+            fun <T> timed(name: String, block: () -> T): T { val t = System.nanoTime(); return block().also { diag.stage(name,System.nanoTime()-t) } }
+            val ff = on(faceThread) { timed("face") { face!!.detectForVideo(mpImage,ms) } }
+            val pf = on(poseThread) { timed("pose") { pose!!.detectForVideo(mpImage,ms) } }
+            val hf = on(handThread) { timed("hands") { hands!!.detectForVideo(mpImage,ms) } }
+            val f = ff.get(); val p = pf.get(); val h = hf.get(); lap("tracking")
             val fp = f.faceLandmarks().firstOrNull()?.let { points(it) } ?: emptyList()
             val pp = p.landmarks().firstOrNull()?.let { points(it) } ?: emptyList()
             val hh = h.landmarks().map { points(it) }
@@ -234,12 +247,16 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         if (!worker.isShutdown) worker.execute { closeModels() }
     }
     private fun closeModels() {
-        face?.close(); face = null; pose?.close(); pose = null; hands?.close(); hands = null
+        val closing = listOf(on(faceThread) { face?.close(); face = null }, on(poseThread) { pose?.close(); pose = null },
+            on(handThread) { hands?.close(); hands = null })
+        closing.forEach { runCatching { it.get() } }
         bank?.close(); bank = null; window.reset(); lastMs = -1
     }
     override fun dispose() {
         if (disposed) return
-        disposed = true; stop(); worker.shutdown()
+        disposed = true; stop()
+        worker.execute { listOf(faceThread,poseThread,handThread).forEach { it.shutdown() } }
+        worker.shutdown()
         activity.detachPanel(this)
     }
 }
