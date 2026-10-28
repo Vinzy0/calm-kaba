@@ -3,3 +3,5 @@
 android/app/src/main/assets/behavior/*.txt -text
 android/app/src/main/assets/behavior/*.json -text
 android/app/src/main/assets/tracking/*.task -text
+android/app/src/main/assets/behavior_v6/*.txt -text
+android/app/src/main/assets/behavior_v6/*.json -text

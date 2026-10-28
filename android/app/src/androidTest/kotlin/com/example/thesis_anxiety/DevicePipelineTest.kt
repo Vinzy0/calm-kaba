@@ -28,13 +28,15 @@ class DevicePipelineTest {
             for (name in source.list(path)!!) source.open("$path/$name").use { input -> File(target,name).outputStream().use { input.copyTo(it) } }
         }
         copyFolder("behavior",File(root,"assets/behavior"))
+        copyFolder("behavior_v6",File(root,"assets/behavior_v6"))
         copyFolder("parity",File(root,"fixtures"),true)
         val checks = PipelineParityTest().configure(File(root,"assets"),File(root,"fixtures"),root)
         checks.rawTaskResultsMatchDatasetExporter()
         checks.jniPredictionsMatchPythonWithMissingInputs()
         checks.recordedWindowsMatchPython()
+        checks.recordedWindowsMatchLeadV6Pipeline()
         checks.windowsResetAndTrackingDoesNotBecomeZeroScore()
-        for (name in listOf("adapter_pixel.json","jni_predictions.json","kotlin_features.json"))
+        for (name in listOf("adapter_pixel.json","jni_predictions.json","kotlin_features.json","kotlin_features_v6.json"))
             File(context.filesDir,"device_$name").writeBytes(File(root,name).readBytes())
     }
 

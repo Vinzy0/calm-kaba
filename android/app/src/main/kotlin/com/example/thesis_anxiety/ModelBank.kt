@@ -4,16 +4,24 @@ import org.json.JSONObject
 import java.io.Closeable
 import java.security.MessageDigest
 
-class ModelBank(read: (String) -> ByteArray) : Closeable {
+/**
+ * Seven independent classifiers from one bundle directory:
+ *  behavior/    822-feature full models, symptom vs everything (2026-10-27 run)
+ *  behavior_v6/ the lead's 1,122-feature LightGBM models, symptom vs control
+ */
+class ModelBank(val folder: String = "behavior", read: (String) -> ByteArray) : Closeable {
     data class Model(val symptom: String, val threshold: Double, val handle: Long, val indices: IntArray)
-    val manifest = JSONObject(String(read("behavior/manifest.json"), Charsets.UTF_8))
+    val manifest = JSONObject(String(read("$folder/manifest.json"), Charsets.UTF_8))
+    val runId: String = manifest.getString("run_id")
+    val mode: String = manifest.getString("mode")
     val engine: FeatureEngine
     private val models = mutableListOf<Model>()
     init {
-        require(manifest.getString("run_id") == "2026-10-27_51participants_full_vs_restricted")
-        require(manifest.getString("feature_version") == "full" && manifest.getString("mode") == "vs_everything")
+        val version = manifest.getString("feature_version")
+        require(runId == "2026-10-27_51participants_full_vs_restricted" && version == "full" && mode == "vs_everything" ||
+            runId == "lead_2026-10-27_lgbm_vs_control_both" && version == "v6" && mode == "vs_control") { "Unknown model bundle $runId" }
         fun strings(key: String) = manifest.getJSONArray(key).let { a -> List(a.length()) { a.getString(it) } }
-        engine = FeatureEngine(strings("bs_names"), strings("fm_names"))
+        engine = FeatureEngine(strings("bs_names"), strings("fm_names"), pooled = version == "v6")
         try {
             val list = manifest.getJSONArray("models")
             require(list.length() == 7)
@@ -21,8 +29,8 @@ class ModelBank(read: (String) -> ByteArray) : Closeable {
                 val m = list.getJSONObject(i)
                 val schema = m.getJSONArray("features")
                 val indices = IntArray(schema.length()) { j -> engine.names.indexOf(schema.getString(j)).also { require(it >= 0) } }
-                require(indices.size == 822 && indices.toSet().size == 822)
-                val bytes = read("behavior/${m.getString("file")}")
+                require(indices.size == engine.names.size && indices.toSet().size == indices.size)
+                val bytes = read("$folder/${m.getString("file")}")
                 require(sha256(bytes) == m.getString("model_sha256")) { "Model checksum failed" }
                 models.add(Model(m.getString("symptom"), m.getDouble("threshold"), NativeLgbm.load(String(bytes, Charsets.UTF_8)), indices))
             }
@@ -45,7 +53,7 @@ class ModelBank(read: (String) -> ByteArray) : Closeable {
                 "reason" to reason, "warning" to warning)
         }
         timing("classifiers",System.nanoTime()-extracted)
-        return mapOf("results" to results, "fps" to fps, "coverage" to coverage,
+        return mapOf("results" to results, "fps" to fps, "coverage" to coverage, "runId" to runId, "mode" to mode,
             "featureCoverage" to features.count { it.isFinite() }.toDouble()/features.size, "start" to start, "end" to start+4)
     }
     override fun close() { models.forEach { NativeLgbm.free(it.handle) }; models.clear() }

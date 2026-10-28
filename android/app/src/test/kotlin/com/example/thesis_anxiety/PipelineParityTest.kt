@@ -87,6 +87,52 @@ class PipelineParityTest {
             "prediction_tolerance" to 1e-6,"failures" to failures)).toString(2))
         assertTrue(failures.take(30).joinToString("\n"),failures.isEmpty())
     }
+    /** Dataset rows -> v6 (822 + 300 all-landmark) features -> the lead's seven models. */
+    @Test fun recordedWindowsMatchLeadV6Pipeline() {
+        val cases = JSONArray(File(fixtures,"windows_v6.json").readText())
+        val manifest = JSONObject(File(assets,"behavior_v6/manifest.json").readText())
+        fun names(key: String) = manifest.getJSONArray(key).let { a -> List(a.length()) { a.getString(it) } }
+        val engine = FeatureEngine(names("bs_names"),names("fm_names"),pooled = true)
+        val schema = manifest.getJSONArray("models").getJSONObject(0).getJSONArray("features")
+        assertEquals(List(schema.length()) { schema.getString(it) },engine.names)
+        var maxAbs = 0.0; var count = 0; var nanCount = 0; var maxPrediction = 0.0; var pooledFinite = 0
+        val failures = mutableListOf<String>()
+        val models = manifest.getJSONArray("models")
+        val handles = LongArray(models.length()) { i -> NativeLgbm.load(File(assets,"behavior_v6/${models.getJSONObject(i).getString("file")}").readText()) }
+        try {
+            for (i in 0 until cases.length()) {
+                val c = cases.getJSONObject(i); val columns = c.getJSONArray("columns")
+                val tt = array(c.getJSONArray("times")); val rows = c.getJSONArray("rows")
+                val records = List(tt.size) { j ->
+                    val values = array(rows.getJSONArray(j))
+                    val row = values.indices.associate { columns.getString(it) to values[it] }
+                    val (coords, vis) = AllLandmarkFeatures.fromRow(row)
+                    Observation(tt[j],row,emptyMap(),coords,vis)
+                }
+                val actual = engine.extract(records,c.getDouble("start"))
+                val expected = array(c.getJSONArray("features"))
+                assertEquals(1122,actual.size)
+                for (j in actual.indices) {
+                    if (expected[j].isNaN()) { if (!actual[j].isNaN()) failures.add("NaN mask ${c.getString("name")}/${engine.names[j]}"); nanCount++; continue }
+                    if (!actual[j].isFinite()) { failures.add("Unexpected NaN ${c.getString("name")}/${engine.names[j]}"); continue }
+                    val delta = abs(actual[j]-expected[j]); maxAbs = maxOf(maxAbs,delta/maxOf(1.0,abs(expected[j])))
+                    if (delta > 2e-5+2e-6*abs(expected[j])) failures.add("${c.getString("name")}/${engine.names[j]}: ${actual[j]} vs ${expected[j]}")
+                    count++; if (j >= 822) pooledFinite++
+                }
+                val probs = array(c.getJSONArray("probabilities"))
+                for (m in handles.indices) {
+                    val delta = abs(NativeLgbm.predict(handles[m],actual)-probs[m])
+                    maxPrediction = maxOf(maxPrediction,delta)
+                    if (delta > 1e-6) failures.add("${c.getString("name")}/prediction/$m: error=$delta")
+                }
+            }
+        } finally { handles.forEach { NativeLgbm.free(it) } }
+        File(evidence,"kotlin_features_v6.json").writeText(JSONObject(mapOf("cases" to cases.length(),"finite_features" to count,
+            "finite_pooled_features" to pooledFinite,"missing_features" to nanCount,"max_scaled_error" to maxAbs,
+            "feature_atol" to 2e-5,"feature_rtol" to 2e-6,"max_prediction_error" to maxPrediction,
+            "prediction_tolerance" to 1e-6,"failures" to failures.take(50))).toString(2))
+        assertTrue(failures.take(30).joinToString("\n"),failures.isEmpty())
+    }
     @Test fun jniPredictionsMatchPythonWithMissingInputs() {
         val data = JSONObject(File(fixtures,"predictions.json").readText())
         val manifest = JSONObject(File(assets,"behavior/manifest.json").readText())

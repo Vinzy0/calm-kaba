@@ -60,6 +60,8 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     private var lastMs = -1L
     @Volatile private var disposed = false
     @Volatile private var running = false
+    /** Model bundle for the next start: "behavior" (822, vs everything) or "behavior_v6" (lead, 1,122, vs control). */
+    @Volatile var modelFolder = "behavior"
     @Volatile var diagnosticsEnabled = false
         set(value) { field = value; if (value && running) scheduleDiagnostics(generation.get()) }
     private fun scheduleDiagnostics(id: Int) {
@@ -88,7 +90,8 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         worker.execute {
             try {
                 if (generation.get() != id) return@execute
-                bank = ModelBank { path -> activity.assets.open(path).use { it.readBytes() } }
+                bank = ModelBank(modelFolder) { path -> activity.assets.open(path).use { it.readBytes() } }
+                diag.delegates = diag.delegates + ("models" to "${bank!!.runId} (${bank!!.engine.names.size} features)")
                 val sources = JSONObject(activity.assets.open("behavior/tracking_sources.json").bufferedReader().use { it.readText() })
                 for (name in listOf("face_landmarker.task","pose_landmarker_lite.task","hand_landmarker.task")) {
                     val bytes = activity.assets.open("tracking/$name").use { it.readBytes() }

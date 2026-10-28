@@ -162,6 +162,16 @@ class DetectionService {
     }
   }
 
+  /// Model bundle for the next scan: 'v4' (822 features, symptom vs everything)
+  /// or 'v6' (the lead's 1,122-feature LightGBM, symptom vs control).
+  Future<void> setModels(String version) async {
+    try {
+      await _methods.invokeMethod<void>('models', version);
+    } on MissingPluginException {
+      /* Non-Android widget tests have no camera. */
+    }
+  }
+
   Future<void> setDiagnostics(bool enabled) async {
     if (!enabled) diagnostics.value = null;
     try {

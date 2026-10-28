@@ -25,6 +25,7 @@ class _HomePageState extends State<HomePage>
   bool _isDetecting = false;
   bool _cameraReady = false;
   bool _developerMode = false;
+  bool _leadModels = false;
   int _selectedTabIndex = 0;
   String _status =
       'Keep your face, shoulders, and hands visible. Move back for knees.';
@@ -359,6 +360,32 @@ class _HomePageState extends State<HomePage>
                     ),
                   ],
                 ),
+                if (_developerMode)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'All-landmark models (lead v6, symptom vs control; next scan)',
+                          style: AppTypography.bodySmall.copyWith(
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Switch(
+                        value: _leadModels,
+                        onChanged: _isDetecting
+                            ? null
+                            : (value) {
+                                setState(() => _leadModels = value);
+                                unawaited(
+                                  _detectionService.setModels(
+                                    value ? 'v6' : 'v4',
+                                  ),
+                                );
+                              },
+                      ),
+                    ],
+                  ),
                 if (_developerMode)
                   DiagnosticsPanel(source: _detectionService.diagnostics),
                 const SizedBox(height: 12),

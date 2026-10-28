@@ -2,7 +2,9 @@ package com.example.thesis_anxiety
 
 import kotlin.math.*
 
-data class Observation(val time: Double, val row: Map<String, Double>, val tracking: Map<String, Boolean>)
+/** coords/visibility carry every normalized landmark for the all-landmark features (see AllLandmarkFeatures). */
+class Observation(val time: Double, val row: Map<String, Double>, val tracking: Map<String, Boolean>,
+                  val coords: FloatArray? = null, val visibility: FloatArray? = null)
 data class Point3(val x: Double, val y: Double, val z: Double = 0.0,
                   val visibility: Double = 1.0, val presence: Double = 1.0)
 
@@ -49,6 +51,8 @@ object LandmarkAdapter {
         val row = mutableMapOf<String, Double>()
         val tracking = trackKeys.associateWith { false }.toMutableMap()
         val w = width.toDouble(); val h = height.toDouble()
+        val coords = FloatArray(AllLandmarkFeatures.CHANNELS) { Float.NaN }; val vis = FloatArray(33) { Float.NaN }
+        fun keep(offset: Int, points: List<Point3>) = points.forEachIndexed { i, p -> coords[offset+2*i] = p.x.toFloat(); coords[offset+2*i+1] = p.y.toFloat() }
         fun store(prefix: String, points: List<Point3>, indices: List<Int>) {
             for (i in indices) { row["${prefix}_${i}_x"] = points[i].x; row["${prefix}_${i}_y"] = points[i].y }
         }
@@ -56,7 +60,7 @@ object LandmarkAdapter {
         if (facePoints.size >= 478) {
             val frame = faceFrame(facePoints, w, h)
             val normalized = facePoints.map(frame::apply)
-            store("face", normalized, face)
+            store("face", normalized, face); keep(0, normalized.take(478))
             tracking["face"] = face.all { normalized[it].x.isFinite() && normalized[it].y.isFinite() }
             for (name in bs) row[name] = blendshapes[name.removePrefix("bs_")] ?: Double.NaN
             if (matrix?.size == 16) for (name in fm) {
@@ -67,7 +71,8 @@ object LandmarkAdapter {
         if (body.size >= 33) {
             val frame = bodyFrame(body, w, h)
             val normalized = body.map(frame::apply)
-            store("pose", normalized, pose)
+            store("pose", normalized, pose); keep(956, normalized.take(33))
+            for (i in 0 until 33) vis[i] = body[i].visibility.toFloat()
             // The exporter's body_reference_available: the transform always exists with a pose.
             val reference = pose.all { normalized[it].x.isFinite() && normalized[it].y.isFinite() }
             tracking["reference"] = reference
@@ -81,7 +86,8 @@ object LandmarkAdapter {
                             else if (cost(0,0)+cost(1,1) <= cost(0,1)+cost(1,0)) 0 else 1
                 for (i in hh.indices) {
                     val side = if ((first+i)%2 == 0) "left_hand" else "right_hand"
-                    store(side, hh[i].map(frame::apply), hands)
+                    val hand = hh[i].map(frame::apply)
+                    store(side, hand, hands); keep(if (side == "left_hand") 1022 else 1064, hand.take(21))
                     tracking[side] = true
                 }
             }
@@ -89,11 +95,12 @@ object LandmarkAdapter {
         row["face_detected"] = if (facePoints.isNotEmpty()) 1.0 else 0.0
         row["pose_detected"] = if (body.isNotEmpty()) 1.0 else 0.0
         for (side in listOf("left_hand", "right_hand")) row["${side}_detected"] = if (tracking[side] == true) 1.0 else 0.0
-        return Observation(time, row, tracking)
+        return Observation(time, row, tracking, coords, vis)
     }
 }
 
-class FeatureEngine(val bs: List<String>, val fm: List<String>) {
+/** v4 window features (822); with [pooled], the lead's 300 all-landmark features follow (v6, 1,122). */
+class FeatureEngine(val bs: List<String>, val fm: List<String>, val pooled: Boolean = false) {
     companion object {
         val flags = listOf("face_detected", "pose_detected", "left_hand_detected", "right_hand_detected")
         val stats = listOf("mean", "std", "range", "vel_mean", "vel_p95", "log_power", "dom_freq", "band_breath", "band_move", "band_tremor")
@@ -129,7 +136,8 @@ class FeatureEngine(val bs: List<String>, val fm: List<String>) {
     val signalNames = signals(emptyMap()).keys.toList()
     val names = signalNames.flatMap { s -> stats.map { "f_${s}_$it" } } +
         bs.flatMap { s -> listOf("mean", "std", "max").map { "f_${s}_$it" } } +
-        fm.flatMap { s -> listOf("mean", "std").map { "f_${s}_$it" } } + flags.map { "f_${it}_rate" }
+        fm.flatMap { s -> listOf("mean", "std").map { "f_${s}_$it" } } + flags.map { "f_${it}_rate" } +
+        (if (pooled) AllLandmarkFeatures.names else emptyList())
 
     // NumPy's contiguous float64 pairwise reduction, including the eight accumulators.
     private fun sum(a: DoubleArray, from: Int = 0, n: Int = a.size): Double {
@@ -206,6 +214,7 @@ class FeatureEngine(val bs: List<String>, val fm: List<String>) {
             var total = 0f; for (v in a) total += v
             out.add(if (a.isEmpty()) Double.NaN else (total/a.size).toDouble())
         }
+        if (pooled) AllLandmarkFeatures.extract(inside,start).forEach { out.add(it) }
         require(out.size == names.size)
         return out.map { it.toFloat().toDouble() }.toDoubleArray()
     }
