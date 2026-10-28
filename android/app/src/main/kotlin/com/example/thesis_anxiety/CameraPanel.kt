@@ -32,6 +32,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.components.containers.NormalizedLandmark
 import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
@@ -44,6 +45,8 @@ import org.json.JSONObject
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -81,6 +84,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     @Volatile var lockFps30 = true
     private var startedAt = 0L
     private var frameCount = 0
+    private val rgbaBuffer = RgbaFrameBuffer()
     /** Phone state that changes speed: battery, power saving, heat. Read once per diagnostics packet. */
     private fun deviceInfo(): Map<String, Any?> {
         val power = activity.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -265,29 +269,31 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         val begin = System.nanoTime()
         val sensorNs = image.imageInfo.timestamp
         diag.age(sensorNs)?.let { diag.stage("captureToAnalyzer",it) }
-        // toBitmap handles RGBA row stride; crop and rotate before all three tasks.
+        // Padded RGBA rows still use CameraX's conversion; crop/rotation is unchanged.
         // No front-camera reflection enters a MediaPipe/model input.
-        val original = image.toBitmap()
+        val original = rgbaBuffer.copy(image)
         val converted = System.nanoTime(); diag.stage("convert",converted-begin)
         val crop = image.cropRect
         val rotated = Bitmap.createBitmap(original,crop.left,crop.top,crop.width(),crop.height(),
             Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) },true)
-        val mpImage = BitmapImageBuilder(rotated).build()
+        val mpImage = if (rotated === rgbaBuffer.bitmap) rgbaBuffer.image!! else BitmapImageBuilder(rotated).build()
+        val readers = ArrayList<Future<*>>(3)
         var mark = System.nanoTime(); diag.stage("cropRotate",mark-converted)
         if (frameCount++ % 15 == 0) diag.brightness = meanBrightness(rotated)
         fun lap(name: String) { val now = System.nanoTime(); diag.stage(name,now-mark); mark = now }
         if (diag.input.isEmpty()) diag.input = mapOf("analysis" to "${image.width}x${image.height}",
             "crop" to "${crop.width()}x${crop.height()}", "modelInput" to "${rotated.width}x${rotated.height}",
-            "rotation" to image.imageInfo.rotationDegrees, "format" to "RGBA_8888", "camera" to if (mirrored) "front" else "back")
+            "rotation" to image.imageInfo.rotationDegrees, "format" to "RGBA_8888", "camera" to if (mirrored) "front" else "back",
+            "bitmapReuse" to (original === rgbaBuffer.bitmap), "rowStride" to image.planes.firstOrNull()?.rowStride)
         try {
             val ms = maxOf(lastMs+1,image.imageInfo.timestamp/1_000_000)
             val interrupted = lastMs >= 0 && ms-lastMs > 500
             lastMs = ms
             // The tasks only read the shared input image.
             fun <T> timed(name: String, block: () -> T): T { val t = System.nanoTime(); return block().also { diag.stage(name,System.nanoTime()-t) } }
-            val ff = on(faceThread) { timed("face") { runOrFallback("face",{ face },{ createFace(false).also { face = it } }) { it.detectForVideo(mpImage,ms) } } }
-            val pf = on(poseThread) { timed("pose") { runOrFallback("pose",{ pose },{ createPose(false).also { pose = it } }) { it.detectForVideo(mpImage,ms) } } }
-            val hf = on(handThread) { timed("hands") { runOrFallback("hands",{ hands },{ createHands(false).also { hands = it } }) { it.detectForVideo(mpImage,ms) } } }
+            val ff = on(faceThread) { timed("face") { runOrFallback("face",{ face },{ createFace(false).also { face = it } }) { it.detectForVideo(mpImage,ms) } } }.also { readers.add(it) }
+            val pf = on(poseThread) { timed("pose") { runOrFallback("pose",{ pose },{ createPose(false).also { pose = it } }) { it.detectForVideo(mpImage,ms) } } }.also { readers.add(it) }
+            val hf = on(handThread) { timed("hands") { runOrFallback("hands",{ hands },{ createHands(false).also { hands = it } }) { it.detectForVideo(mpImage,ms) } } }.also { readers.add(it) }
             val f = ff.get(); val p = pf.get(); val h = hf.get(); lap("tracking")
             val fp = f.faceLandmarks().firstOrNull()?.let { points(it) } ?: emptyList()
             val pp = p.landmarks().firstOrNull()?.let { points(it) } ?: emptyList()
@@ -316,9 +322,11 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
             diag.stage("total",end-begin); diag.processed.tick(end); diag.tracking(observation.tracking,end)
             diag.age(sensorNs)?.let { diag.stage("captureToResult",it) }
         } finally {
-            mpImage.close()
-            if (rotated !== original) rotated.recycle()
-            original.recycle()
+            // A failed tracker must still wait for the other image readers.
+            awaitTrackerReaders(readers)
+            // Closing MPImage recycles its bitmap; keep the reusable wrapper alive too.
+            if (mpImage !== rgbaBuffer.image) mpImage.close()
+            if (original !== rgbaBuffer.bitmap && original !== rotated) original.recycle()
         }
     }
     fun stop() {
@@ -332,6 +340,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         val closing = listOf(on(faceThread) { runCatching { face?.close() }; face = null }, on(poseThread) { runCatching { pose?.close() }; pose = null },
             on(handThread) { runCatching { hands?.close() }; hands = null })
         closing.forEach { runCatching { it.get() } }
+        rgbaBuffer.close()
         bank?.close(); bank = null; window.reset(); lastMs = -1
     }
     override fun dispose() {
@@ -341,6 +350,38 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         worker.shutdown()
         activity.detachPanel(this)
     }
+}
+
+/** Owned by the single analysis worker, including resize and stop/dispose cleanup. */
+internal class RgbaFrameBuffer : AutoCloseable {
+    var bitmap: Bitmap? = null; private set
+    var image: MPImage? = null; private set
+    fun copy(frame: ImageProxy): Bitmap {
+        val plane = frame.planes.firstOrNull()
+        if (frame.format != PixelFormat.RGBA_8888 || plane == null || plane.pixelStride != 4 || plane.rowStride != frame.width*4)
+            return frame.toBitmap()
+        if (bitmap?.width != frame.width || bitmap?.height != frame.height) {
+            close()
+            bitmap = Bitmap.createBitmap(frame.width, frame.height, Bitmap.Config.ARGB_8888)
+            image = BitmapImageBuilder(bitmap!!).build()
+        }
+        bitmap!!.copyPixelsFromBuffer(plane.buffer.duplicate().apply { rewind() })
+        return bitmap!!
+    }
+    override fun close() {
+        image?.close(); image = null; bitmap = null
+    }
+}
+
+/** Drain every reader even after a failure or interruption, before recycling its image. */
+internal fun awaitTrackerReaders(readers: List<Future<*>>) {
+    var interrupted = false
+    for (reader in readers) while (true) {
+        try { reader.get(); break }
+        catch (e: InterruptedException) { interrupted = true }
+        catch (e: ExecutionException) { break }
+    }
+    if (interrupted) Thread.currentThread().interrupt()
 }
 
 private class LandmarkOverlay(context: Context, private val drawn: (Long) -> Unit) : View(context) {
