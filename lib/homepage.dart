@@ -5,6 +5,7 @@ import 'services/detection_service.dart';
 import 'services/log_service.dart';
 import 'services/navigation_observer.dart';
 import 'components/camera_preview.dart';
+import 'components/diagnostics_panel.dart';
 
 class HomePage extends StatefulWidget {
   final bool active;
@@ -23,6 +24,7 @@ class _HomePageState extends State<HomePage>
   ModalRoute<void>? _route;
   bool _isDetecting = false;
   bool _cameraReady = false;
+  bool _developerMode = false;
   int _selectedTabIndex = 0;
   String _status =
       'Keep your face, shoulders, and hands visible. Move back for knees.';
@@ -338,6 +340,27 @@ class _HomePageState extends State<HomePage>
                     color: AppColors.textPrimary,
                   ),
                 ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Developer diagnostics',
+                        style: AppTypography.bodySmall.copyWith(
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Switch(
+                      value: _developerMode,
+                      onChanged: (value) {
+                        setState(() => _developerMode = value);
+                        unawaited(_detectionService.setDiagnostics(value));
+                      },
+                    ),
+                  ],
+                ),
+                if (_developerMode)
+                  DiagnosticsPanel(source: _detectionService.diagnostics),
                 const SizedBox(height: 12),
               ],
             ),

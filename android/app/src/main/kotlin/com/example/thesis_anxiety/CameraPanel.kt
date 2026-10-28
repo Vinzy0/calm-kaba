@@ -4,6 +4,11 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.*
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.os.Handler
 import android.os.Looper
 import android.util.Rational
@@ -11,6 +16,10 @@ import android.util.Log
 import android.util.Size
 import android.view.View
 import android.widget.FrameLayout
+import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.*
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
@@ -36,7 +45,8 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         scaleType = PreviewView.ScaleType.FIT_CENTER
     }
-    private val overlay = LandmarkOverlay(activity)
+    val diag = Diagnostics()
+    private val overlay = LandmarkOverlay(activity) { ts -> diag.age(ts)?.let { diag.stage("overlayAge",it) } }
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private val generation = AtomicInteger()
@@ -50,6 +60,17 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     private var lastMs = -1L
     @Volatile private var disposed = false
     @Volatile private var running = false
+    @Volatile var diagnosticsEnabled = false
+        set(value) { field = value; if (value && running) scheduleDiagnostics(generation.get()) }
+    private fun scheduleDiagnostics(id: Int) {
+        main.postDelayed({
+            if (disposed || !running || !diagnosticsEnabled || generation.get() != id) return@postDelayed
+            val packet = diag.snapshot()
+            Log.i("CalmDiag", JSONObject(packet).toString())
+            emit(packet)
+            scheduleDiagnostics(id)
+        }, 1000)
+    }
     init { root.addView(preview,FrameLayout.LayoutParams(-1,-1)); root.addView(overlay,FrameLayout.LayoutParams(-1,-1)) }
     override fun getView(): View = root
     private fun event(id: Int, packet: Map<String, Any?>) { main.post { if (!disposed && generation.get() == id) emit(packet) } }
@@ -60,6 +81,9 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         }
         running = true
         val id = generation.incrementAndGet()
+        diag.reset()
+        diag.delegates = mapOf("requested" to "CPU", "face" to "CPU", "pose" to "CPU", "hands" to "CPU", "fallback" to "")
+        if (diagnosticsEnabled) scheduleDiagnostics(id)
         event(id,mapOf("type" to "status", "message" to "Starting camera and landmark tracking"))
         worker.execute {
             try {
@@ -93,6 +117,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
             }
         }
     }
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCamera(id: Int) {
         if (disposed || generation.get() != id) return
         if (preview.width == 0 || preview.height == 0) { preview.post { bindCamera(id) }; return }
@@ -105,21 +130,39 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
                 val mirrored = selector == CameraSelector.DEFAULT_FRONT_CAMERA
                 val rotation = preview.display?.rotation ?: 0
                 val resolution = ResolutionSelector.Builder().setResolutionStrategy(ResolutionStrategy(Size(640,480),ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER)).build()
-                val usePreview = Preview.Builder().setTargetRotation(rotation).setResolutionSelector(resolution).build()
+                val previewBuilder = Preview.Builder().setTargetRotation(rotation).setResolutionSelector(resolution)
+                // The session callback sees every repeating capture (preview + analysis surfaces).
+                Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
+                    private var n = 0
+                    override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+                        diag.captured.tick()
+                        if (n++ % 30 == 0) diag.exposure = mapOf(
+                            "aeFpsRange" to result.get(CaptureResult.CONTROL_AE_TARGET_FPS_RANGE)?.toString(),
+                            "exposureMs" to result.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { it/1e6 },
+                            "frameDurationMs" to result.get(CaptureResult.SENSOR_FRAME_DURATION)?.let { it/1e6 })
+                    }
+                })
+                val usePreview = previewBuilder.build()
                 usePreview.setSurfaceProvider(preview.surfaceProvider)
                 val useAnalysis = ImageAnalysis.Builder().setTargetRotation(rotation).setResolutionSelector(resolution)
                     .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build()
                 analysis = useAnalysis
                 useAnalysis.setAnalyzer(worker) { image ->
-                    if (generation.get() != id || disposed) { image.close(); return@setAnalyzer }
+                    diag.delivered.tick()
+                    if (generation.get() != id || disposed) { diag.skipped.tick(); image.close(); return@setAnalyzer }
                     try { process(image,id,mirrored) } catch (e: Throwable) { fail(id,e) } finally { image.close() }
                 }
                 // Shared ViewPort gives analysis the exact crop shown in the preview.
                 val group = UseCaseGroup.Builder().addUseCase(usePreview).addUseCase(useAnalysis)
                     .setViewPort(ViewPort.Builder(Rational(preview.width.coerceAtLeast(1),preview.height.coerceAtLeast(1)),rotation)
                         .setScaleType(ViewPort.FILL_CENTER).build()).build()
-                camera.unbindAll(); camera.bindToLifecycle(activity,selector,group)
+                camera.unbindAll()
+                val bound = camera.bindToLifecycle(activity,selector,group)
+                diag.realtimeClock = try {
+                    Camera2CameraInfo.from(bound.cameraInfo).getCameraCharacteristic(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) ==
+                        CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
+                } catch (e: Throwable) { null }
                 event(id,mapOf("type" to "status", "message" to "Settle for one second, then hold position for four seconds"))
             } catch (e: Throwable) { fail(id,e) }
         },ContextCompat.getMainExecutor(activity))
@@ -128,20 +171,29 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         Point3(it.x().toDouble(),it.y().toDouble(),it.z().toDouble(),it.visibility().orElse(1f).toDouble(),it.presence().orElse(1f).toDouble())
     }
     private fun process(image: ImageProxy, id: Int, mirrored: Boolean) {
+        val begin = System.nanoTime()
+        val sensorNs = image.imageInfo.timestamp
+        diag.age(sensorNs)?.let { diag.stage("captureToAnalyzer",it) }
         // toBitmap handles RGBA row stride; crop and rotate before all three tasks.
         // No front-camera reflection enters a MediaPipe/model input.
         val original = image.toBitmap()
+        val converted = System.nanoTime(); diag.stage("convert",converted-begin)
         val crop = image.cropRect
         val rotated = Bitmap.createBitmap(original,crop.left,crop.top,crop.width(),crop.height(),
             Matrix().apply { postRotate(image.imageInfo.rotationDegrees.toFloat()) },true)
         val mpImage = BitmapImageBuilder(rotated).build()
+        var mark = System.nanoTime(); diag.stage("cropRotate",mark-converted)
+        fun lap(name: String) { val now = System.nanoTime(); diag.stage(name,now-mark); mark = now }
+        if (diag.input.isEmpty()) diag.input = mapOf("analysis" to "${image.width}x${image.height}",
+            "crop" to "${crop.width()}x${crop.height()}", "modelInput" to "${rotated.width}x${rotated.height}",
+            "rotation" to image.imageInfo.rotationDegrees, "format" to "RGBA_8888", "camera" to if (mirrored) "front" else "back")
         try {
             val ms = maxOf(lastMs+1,image.imageInfo.timestamp/1_000_000)
             val interrupted = lastMs >= 0 && ms-lastMs > 500
             lastMs = ms
-            val f = face!!.detectForVideo(mpImage,ms)
-            val p = pose!!.detectForVideo(mpImage,ms)
-            val h = hands!!.detectForVideo(mpImage,ms)
+            val f = face!!.detectForVideo(mpImage,ms); lap("face")
+            val p = pose!!.detectForVideo(mpImage,ms); lap("pose")
+            val h = hands!!.detectForVideo(mpImage,ms); lap("hands")
             val fp = f.faceLandmarks().firstOrNull()?.let { points(it) } ?: emptyList()
             val pp = p.landmarks().firstOrNull()?.let { points(it) } ?: emptyList()
             val hh = h.landmarks().map { points(it) }
@@ -153,11 +205,21 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
             val engine = bank!!.engine
             val observation = LandmarkAdapter.adapt(ms/1000.0,fp,pp,hh,blend,matrix,engine.bs,engine.fm)
             val snapshot = window.push(observation)
+            lap("adaptWindow")
             val faceDraw = LandmarkAdapter.face.filter { it < fp.size }.map { fp[it] }
             val imageWidth = rotated.width; val imageHeight = rotated.height
-            main.post { if (generation.get() == id && !disposed) overlay.update(faceDraw,pp,hh,imageWidth,imageHeight,mirrored) }
+            main.post { if (generation.get() == id && !disposed) overlay.update(faceDraw,pp,hh,imageWidth,imageHeight,mirrored,sensorNs) }
             event(id,mapOf("type" to "tracking", "tracking" to observation.tracking, "progress" to window.progress(), "interrupted" to interrupted))
-            if (snapshot != null) event(id,bank!!.predict(snapshot.first,snapshot.second)+mapOf("type" to "prediction"))
+            if (snapshot != null) {
+                val packet = bank!!.predict(snapshot.first,snapshot.second) { name, ns -> diag.stage(name,ns) }
+                diag.predictions.tick()
+                // The newest frame ends the window; this age shows how stale a prediction is.
+                diag.age(sensorNs)?.let { diag.stage("windowAge",it) }
+                event(id,packet+mapOf("type" to "prediction"))
+            }
+            val end = System.nanoTime()
+            diag.stage("total",end-begin); diag.processed.tick(end); diag.tracking(observation.tracking,end)
+            diag.age(sensorNs)?.let { diag.stage("captureToResult",it) }
         } finally {
             mpImage.close()
             if (rotated !== original) rotated.recycle()
@@ -168,7 +230,7 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
         running = false; generation.incrementAndGet()
         analysis?.clearAnalyzer(); analysis = null
         provider?.unbindAll()
-        overlay.update(emptyList(),emptyList(),emptyList(),1,1,false)
+        overlay.update(emptyList(),emptyList(),emptyList(),1,1,false,0)
         if (!worker.isShutdown) worker.execute { closeModels() }
     }
     private fun closeModels() {
@@ -182,15 +244,17 @@ class CameraPanel(private val activity: MainActivity, private val emit: (Map<Str
     }
 }
 
-private class LandmarkOverlay(context: Context) : View(context) {
+private class LandmarkOverlay(context: Context, private val drawn: (Long) -> Unit) : View(context) {
     private var face = emptyList<Point3>(); private var body = emptyList<Point3>(); private var hands = emptyList<List<Point3>>()
-    private var imageWidth = 1; private var imageHeight = 1; private var mirror = false
+    private var imageWidth = 1; private var imageHeight = 1; private var mirror = false; private var sourceNs = 0L
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(170,255,204); strokeWidth = 2f }
-    fun update(f: List<Point3>, p: List<Point3>, h: List<List<Point3>>, w: Int, height: Int, mirrored: Boolean) {
-        face = f; body = p; hands = h; imageWidth = w; imageHeight = height; mirror = mirrored; invalidate()
+    fun update(f: List<Point3>, p: List<Point3>, h: List<List<Point3>>, w: Int, height: Int, mirrored: Boolean, sensorNs: Long) {
+        face = f; body = p; hands = h; imageWidth = w; imageHeight = height; mirror = mirrored; sourceNs = sensorNs; invalidate()
     }
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // Age of the source camera frame when its landmarks are first drawn.
+        if (sourceNs > 0) { drawn(sourceNs); sourceNs = 0 }
         val scale = minOf(width.toFloat()/imageWidth,height.toFloat()/imageHeight)
         val dx = (width-imageWidth*scale)/2; val dy = (height-imageHeight*scale)/2
         fun xy(p: Point3) = PointF(dx+(if (mirror) 1-p.x else p.x).toFloat()*imageWidth*scale,dy+p.y.toFloat()*imageHeight*scale)

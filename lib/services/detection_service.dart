@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 enum DetectionMode { instant, continuous }
@@ -68,6 +69,12 @@ class DetectionService {
   final _updates = StreamController<Map<dynamic, dynamic>>.broadcast();
   final _detections = StreamController<BehaviorResult>.broadcast();
   final _eventRule = DetectionEventRule();
+
+  /// Developer diagnostics bypass [updates] so they never rebuild the page.
+  final diagnostics = ValueNotifier<Map<dynamic, dynamic>?>(null);
+
+  /// Platform-channel packets received per type since the last diagnostics packet.
+  final Map<String, int> channelPackets = {};
   StreamSubscription<dynamic>? _subscription;
   bool _running = false;
   bool _disposed = false;
@@ -87,6 +94,18 @@ class DetectionService {
       (dynamic value) {
         if (_disposed) return;
         final packet = value as Map<dynamic, dynamic>;
+        final type = packet['type'] as String? ?? '';
+        channelPackets[type] = (channelPackets[type] ?? 0) + 1;
+        if (type == 'diagnostics') {
+          if (_running) {
+            diagnostics.value = {
+              ...packet,
+              'channelPackets': Map.of(channelPackets),
+            };
+          }
+          channelPackets.clear();
+          return;
+        }
         if (!_running &&
             packet['type'] != 'stopped' &&
             packet['type'] != 'error') {
@@ -143,9 +162,19 @@ class DetectionService {
     }
   }
 
+  Future<void> setDiagnostics(bool enabled) async {
+    if (!enabled) diagnostics.value = null;
+    try {
+      await _methods.invokeMethod<void>('diagnostics', enabled);
+    } on MissingPluginException {
+      /* Non-Android widget tests have no camera. */
+    }
+  }
+
   Future<void> stopDetection() async {
     _running = false;
     results = [];
+    diagnostics.value = null;
     try {
       await _methods.invokeMethod<void>('stop');
     } on MissingPluginException {
@@ -160,5 +189,6 @@ class DetectionService {
     await _subscription?.cancel();
     await _updates.close();
     await _detections.close();
+    diagnostics.dispose();
   }
 }
