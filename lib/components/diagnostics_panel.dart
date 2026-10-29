@@ -118,7 +118,7 @@ class _DiagnosticsPanelState extends State<DiagnosticsPanel> {
               TextButton.icon(
                 icon: const Icon(Icons.copy, color: Colors.white, size: 16),
                 label: const Text(
-                  'Copy all (paste to Claude)',
+                  'Copy diagnostics',
                   style: TextStyle(color: Colors.white),
                 ),
                 onPressed: () async {
